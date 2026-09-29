@@ -253,7 +253,7 @@ def compute_steganography_lsb(img_np):
     lsb_composite = cv2.cvtColor(lsb_composite, cv2.COLOR_BGR2RGB)
     return lsb_composite, ones_ratio, risk_score
 
-def compute_cmfd_keypoints(img_np):
+def compute_cmfd_keypoints(img_np, min_dist=35):
     gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
     orb = cv2.ORB_create(nfeatures=800)
     kp, des = orb.detectAndCompute(gray, None)
@@ -269,7 +269,7 @@ def compute_cmfd_keypoints(img_np):
                 pt1 = tuple(np.round(kp[m.queryIdx].pt).astype(int))
                 pt2 = tuple(np.round(kp[m.trainIdx].pt).astype(int))
                 dist = np.hypot(pt1[0] - pt2[0], pt1[1] - pt2[1])
-                if dist > 35:
+                if dist > min_dist:
                     cv2.line(vis, pt1, pt2, (0, 255, 255), 2)
                     cv2.circle(vis, pt1, 4, (255, 0, 0), -1)
                     cv2.circle(vis, pt2, 4, (0, 0, 255), -1)
@@ -636,7 +636,7 @@ if selected_img is not None:
         selected_img.save(buf, format="PNG")
         raw_file_bytes = buf.getvalue()
 
-    # Inference & Physical Transforms
+    # Core Model Inference
     resized = cv2.resize(img_np, (256, 256))
     tensor = torch.tensor(resized, dtype=torch.float32).permute(2, 0, 1).unsqueeze(0) / 255.0
 
@@ -648,6 +648,7 @@ if selected_img is not None:
     pred_mask = cv2.resize(raw_mask_pred, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
     is_tampered = dl_conf >= threshold or ("forged" in sample_name.lower())
 
+    # Auxiliary Physical Transforms for Stage 1
     srm_map, srm_raw = compute_srm(img_np)
     ela_map, ela_raw = compute_ela(selected_img, quality=ela_q)
     fft_map = compute_fft(img_np)
@@ -668,13 +669,8 @@ if selected_img is not None:
         overlay_with_boxes = img_np.copy()
         boxes_found = 0
 
-    # Execute Extended Parameter Diagnostics
     hashes = compute_hashes(raw_file_bytes, selected_img)
     meta_info = extract_metadata(selected_img)
-    lsb_composite, lsb_ones_pct, stego_risk = compute_steganography_lsb(img_np)
-    cmfd_vis, cmfd_matches = compute_cmfd_keypoints(img_np)
-    q_tables = extract_quantization_tables(selected_img)
-    hists, clipping_alerts = compute_histogram_metrics(img_np)
 
     # Construct Case Record
     time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -800,184 +796,243 @@ if selected_img is not None:
             st.markdown('<div class="tile-caption">Red highlighted bounding box localization.</div>', unsafe_allow_html=True)
 
     # --------------------------------------------------------
-    # TAB 2: Multi-Parameter Forensic Diagnostics (ALL 12 MODALITIES)
+    # TAB 2: On-Demand Interactive Diagnostic Parameters
     # --------------------------------------------------------
     with param_tab:
-        st.subheader("🔬 Comprehensive Parameter Diagnostics (12 Modalities)")
+        st.subheader("🔬 On-Demand Parametric Diagnostic Suite")
+        st.write("Select any of the 12 forensic modalities below, configure parameters, and click **🚀 Run Analysis** to evaluate results on demand.")
 
-        # Section 1: Hashes & Provenance
-        st.markdown("### 🔑 1. Cryptographic & Perceptual Hash Verification")
-        p_c1, p_c2 = st.columns(2)
-        with p_c1:
-            st.markdown("""
-            <div class="param-card">
-                <b>Cryptographic Signatures (Exact Match):</b><br>
-            """, unsafe_allow_html=True)
-            st.code(f"SHA-256: {hashes['SHA-256']}\nMD5:     {hashes['MD5']}", language="bash")
-            st.markdown("</div>", unsafe_allow_html=True)
-        with p_c2:
-            st.markdown("""
-            <div class="param-card">
-                <b>Perceptual Fingerprints (Resilient Match):</b><br>
-            """, unsafe_allow_html=True)
-            st.code(f"dHash (Difference): {hashes['dHash']}\naHash (Average):    {hashes['aHash']}", language="bash")
-            st.markdown("</div>", unsafe_allow_html=True)
+        param_choice = st.selectbox(
+            "Select Diagnostic Parameter Modality:",
+            [
+                "🕵️ 1. Error Level Analysis (ELA)",
+                "📋 2. EXIF Metadata & Software Fingerprinting",
+                "📊 3. RGB Histogram & Tonal Forensics",
+                "👻 4. Noise Analysis & JPEG Ghost Detection",
+                "💾 5. JPEG Quantization Table (DQT) Analysis",
+                "🔄 6. Copy-Move Forgery Detection (CMFD)",
+                "📡 7. PRNU Camera Sensor Fingerprint",
+                "📈 8. Frequency Domain 2D-FFT Power Spectrum",
+                "😄 9. Deepfake & Boundary Discontinuity",
+                "🔀 10. Resampling & Luminance Gradients",
+                "🛍️ 11. Steganography & LSB Bit-Plane Randomness",
+                "🔑 12. Cryptographic & Perceptual Hash Verification"
+            ]
+        )
 
-        # Section 2: EXIF Metadata Audit
-        st.markdown("### 📋 2. EXIF Metadata & Software Fingerprinting")
-        m_c1, m_c2 = st.columns([1, 2])
-        with m_c1:
-            st.metric("EXIF Health Status", meta_info["status"])
-            if meta_info["alerts"]:
-                for alert in meta_info["alerts"]:
-                    st.error(f"⚠️ {alert}")
-            else:
-                st.success("No suspicious editing software tags detected.")
-        with m_c2:
-            if meta_info["tags"]:
-                with st.expander("View Full Extracted EXIF Tags", expanded=False):
-                    st.json(meta_info["tags"])
-            else:
-                st.info("No EXIF metadata found. The file may have been re-saved, screenshotted, or stripped.")
+        st.write("---")
 
-        # Section 3: Steganography LSB
-        st.markdown("### 🔐 3. Steganography & LSB Bit-Plane Randomness")
-        st_c1, st_c2, st_c3 = st.columns([1, 1, 1.2])
-        with st_c1:
-            st.metric("LSB Bit-1 Frequency", f"{lsb_ones_pct:.2f}%", help="Natural images hover near 50%. Large deviations indicate payload injection.")
-            st.metric("Stego Anomaly Probability", f"{stego_risk:.1f}%")
-        with st_c2:
-            st.image(lsb_composite, caption="LSB False-Color Heatmap", use_container_width=True)
-        with st_c3:
-            st.markdown("""
-            <div class="param-card" style="font-size:0.85rem;">
-                <b>LSB Diagnostic Assessment:</b><br>
-                Least Significant Bit replacement alters the lowest-order bit of each color channel.
-                Natural sensor noise presents balanced randomness (~50% 1s). 
-                Deviations beyond normal thresholds or high spatial clustering reveal covert payload insertion.
-            </div>
-            """, unsafe_allow_html=True)
+        # 1. ELA
+        if "1. Error Level Analysis" in param_choice:
+            st.markdown("### 🕵️ Error Level Analysis (ELA)")
+            st.caption("Isolates JPEG compression differences across 8×8 DCT blocks. Edited areas compress differently from the original frame.")
+            col_l, col_r = st.columns([1, 1.4])
+            with col_l:
+                st.markdown('<div class="param-card"><b>⚙️ Diagnostic Controls</b></div>', unsafe_allow_html=True)
+                sel_q = st.slider("JPEG Compression Quality", 50, 98, 90, 1, key="p_ela_q")
+                sel_scale = st.slider("Error Scale Factor", 5, 50, 20, 5, key="p_ela_scale")
+                run_ela = st.button("🚀 Run ELA Analysis", use_container_width=True)
+            with col_r:
+                if run_ela:
+                    with st.spinner("Computing ELA difference map..."):
+                        diff_map, _ = compute_ela(selected_img, quality=sel_q, scale=sel_scale)
+                        st.image(diff_map, caption=f"ELA Difference Residual (Q={sel_q}, Scale={sel_scale}x)", use_container_width=True)
+                else:
+                    st.info("Click '🚀 Run ELA Analysis' to generate the diagnostic output.")
 
-        # Section 4: Copy-Move Forgery Detection (CMFD)
-        st.markdown("### 🔄 4. Copy-Move Forgery Detection (CMFD)")
-        cm_c1, cm_c2 = st.columns([1.5, 1])
-        with cm_c1:
-            st.image(cmfd_vis, caption="ORB Inter-Cluster Duplication Vectors", use_container_width=True)
-        with cm_c2:
-            st.metric("Duplicated Keypoint Clusters", f"{cmfd_matches} Matches")
-            if cmfd_matches > 5:
-                st.warning("⚠️ Elevated identical feature clusters detected across spatially distant regions.")
-            else:
-                st.success("✅ Minimal feature redundancy detected across frame.")
+        # 2. METADATA
+        elif "2. EXIF Metadata" in param_choice:
+            st.markdown("### 📋 EXIF Metadata & Software Fingerprinting")
+            st.caption("Deep inspection of EXIF tags, GPS coordinates, timestamps, and editor software signatures.")
+            col_l, col_r = st.columns([1, 1.4])
+            with col_l:
+                run_meta = st.button("🚀 Extract & Analyze Metadata", use_container_width=True)
+                if run_meta:
+                    st.metric("EXIF Health Status", meta_info["status"])
+                    if meta_info["alerts"]:
+                        for a in meta_info["alerts"]:
+                            st.error(f"⚠️ {a}")
+                    else:
+                        st.success("No editing software traces (Photoshop, GIMP, Canva) identified in metadata.")
+            with col_r:
+                if run_meta:
+                    if meta_info["tags"]:
+                        st.dataframe(meta_info["tags"], use_container_width=True, height=280)
+                    else:
+                        st.info("No EXIF metadata found. The file may have been re-saved, screenshotted, or stripped.")
+                else:
+                    st.info("Click '🚀 Extract & Analyze Metadata' to inspect file headers.")
 
-        # Section 5: Histogram & Quantization Tables
-        st.markdown("### 📊 5. Histogram Tonal Distribution & Quantization Tables")
-        hq_c1, hq_c2 = st.columns(2)
-        with hq_c1:
-            st.write("**Color Channel Distributions:**")
-            st.line_chart(hists)
-            if clipping_alerts:
-                for c_al in clipping_alerts:
-                    st.warning(f"⚠️ {c_al}")
-            else:
-                st.caption("No abnormal pure-black or pure-white clipping spikes detected.")
-        with hq_c2:
-            st.write("**JPEG DQT Quantization Matrix:**")
-            if q_tables:
-                for tid, q_arr in q_tables.items():
-                    st.caption(f"Quantization Table #{tid} (8×8):")
-                    st.dataframe(q_arr, use_container_width=True)
-            else:
-                st.info("Quantization tables only exist for native JPEG formats. Current image does not carry uncompressed DQT tables.")
+        # 3. HISTOGRAM
+        elif "3. RGB Histogram" in param_choice:
+            st.markdown("### 📊 Advanced RGB Histogram & Tonal Forensics")
+            st.caption("Evaluates RGB distributions across 0–255 bins to detect comb patterns (posterization) and highlight/shadow clipping.")
+            col_l, col_r = st.columns([1, 1.4])
+            with col_l:
+                run_hist = st.button("🚀 Generate Histogram Analysis", use_container_width=True)
+                if run_hist:
+                    hists, clipping_alerts = compute_histogram_metrics(img_np)
+                    if clipping_alerts:
+                        for ca in clipping_alerts:
+                            st.warning(f"⚠️ {ca}")
+                    else:
+                        st.success("Tonal spectrum is smooth. No severe highlight or shadow clipping spikes detected.")
+            with col_r:
+                if run_hist:
+                    st.line_chart(hists, height=260)
+                else:
+                    st.info("Click '🚀 Generate Histogram Analysis' to compute tonal distribution.")
 
-        # Section 6: Dynamic Error Level Analysis (ELA)
-        st.markdown("### 🕵️ 6. Dynamic Error Level Analysis (ELA)")
-        e_c1, e_c2 = st.columns([1, 1.5])
-        with e_c1:
-            live_q = st.slider("Dynamic Quality Sweep", 50, 95, 90, 5, key="dyn_ela_q")
-            live_scale = st.slider("Error Amplification Factor", 5, 50, 20, 5, key="dyn_ela_s")
-            dyn_ela, _ = compute_ela(selected_img, quality=live_q, scale=live_scale)
-            st.caption("Detects compression inconsistencies across JPEG 8×8 DCT blocks at variable quality.")
-        with e_c2:
-            st.image(dyn_ela, caption=f"Dynamic ELA Map (Q={live_q}, Scale={live_scale}x)", use_container_width=True)
+        # 4. NOISE/GHOST
+        elif "4. Noise Analysis" in param_choice:
+            st.markdown("### 👻 Noise Analysis & JPEG Ghost Detection")
+            st.caption("Detect tampering through noise inconsistencies and compression artifacts across multiple quality sweeps.")
+            col_l, col_r = st.columns([1, 1.4])
+            with col_l:
+                ghost_q = st.select_slider("Ghost Quality Step", options=[70, 75, 80, 85, 90, 95], value=85, key="p_ghost_q")
+                run_ghost = st.button("🚀 Detect JPEG Ghost & Noise", use_container_width=True)
+            with col_r:
+                if run_ghost:
+                    ghost_ela, _ = compute_ela(selected_img, quality=ghost_q, scale=25)
+                    sub_c1, sub_c2 = st.columns(2)
+                    with sub_c1:
+                        st.image(srm_map, caption="SRM High-Frequency Noise", use_container_width=True)
+                    with sub_c2:
+                        st.image(ghost_ela, caption=f"JPEG Ghost at Q={ghost_q}", use_container_width=True)
+                else:
+                    st.info("Click '🚀 Detect JPEG Ghost & Noise' to run multi-quality sweep.")
 
-        # Section 7: Noise & PRNU Sensor Pattern Analysis
-        st.markdown("### 📡 7. PRNU & 5×5 SRM High-Pass Sensor Noise")
-        pr_c1, pr_c2 = st.columns([1, 1.5])
-        with pr_c1:
-            st.markdown("""
-            <div class="param-card">
-                <b>Photo Response Non-Uniformity (PRNU):</b><br>
-                Isolates hardware-level CMOS sensor pattern noise by filtering out low-frequency scene content with a 5×5 Spatial Rich Model (SRM) high-pass kernel.
-            </div>
-            """, unsafe_allow_html=True)
-        with pr_c2:
-            st.image(srm_map, caption="SRM High-Pass Sensor Pattern Noise", use_container_width=True)
+        # 5. QUANT TABLE
+        elif "5. JPEG Quantization Table" in param_choice:
+            st.markdown("### 💾 JPEG Quantization Table (DQT) Analysis")
+            st.caption("Inspects native 8×8 DCT quantization tables to determine compression history and camera origin.")
+            col_l, col_r = st.columns([1, 1.4])
+            with col_l:
+                run_quant = st.button("🚀 Analyze Quantization Tables", use_container_width=True)
+            with col_r:
+                if run_quant:
+                    q_tables = extract_quantization_tables(selected_img)
+                    if q_tables:
+                        for tid, q_arr in q_tables.items():
+                            st.caption(f"Quantization Table #{tid} (8×8):")
+                            st.dataframe(q_arr, use_container_width=True)
+                    else:
+                        st.info("No DQT tables detected. The image is not a raw or unstripped JPEG format.")
+                else:
+                    st.info("Click '🚀 Analyze Quantization Tables' to inspect DCT matrices.")
 
-        # Section 8: 2D-FFT Power Spectrum (Frequency Domain)
-        st.markdown("### 📈 8. Frequency Domain 2D-FFT Power Spectrum")
-        f_c1, f_c2 = st.columns([1, 1.5])
-        with f_c1:
-            st.markdown("""
-            <div class="param-card">
-                <b>Harmonic Spectrum Analysis:</b><br>
-                Maps spatial frequency energy via 2D Fast Fourier Transform. Symmetrical harmonic spikes or lattice grids expose artificial interpolation, GAN synthesis, and bilinear resizing.
-            </div>
-            """, unsafe_allow_html=True)
-        with f_c2:
-            st.image(fft_map, caption="2D-FFT Shifted Power Spectrum Distribution", use_container_width=True)
+        # 6. CMFD
+        elif "6. Copy-Move Forgery" in param_choice:
+            st.markdown("### 🔄 Copy-Move Forgery Detection (CMFD)")
+            st.caption("Identifies cloned, rotated, or duplicated patches within the same image using ORB descriptor keypoint clustering.")
+            col_l, col_r = st.columns([1, 1.4])
+            with col_l:
+                cmfd_dist = st.slider("Minimum Euclidean Distance", 10, 100, 35, 5, key="p_cmfd_dist")
+                run_cmfd = st.button("🚀 Detect Copy-Move Forgery", use_container_width=True)
+            with col_r:
+                if run_cmfd:
+                    cmfd_vis, cmfd_matches = compute_cmfd_keypoints(img_np, min_dist=cmfd_dist)
+                    st.image(cmfd_vis, caption="ORB Feature Vector Duplication Map", use_container_width=True)
+                    if cmfd_matches > 5:
+                        st.warning(f"⚠️ {cmfd_matches} Suspicious duplicate vectors detected across non-adjacent regions.")
+                    else:
+                        st.success("✅ Minimal inter-cluster duplicate vectors detected.")
+                else:
+                    st.info("Click '🚀 Detect Copy-Move Forgery' to compute duplicate vectors.")
 
-        # Section 9: Edge Discontinuity & Seam Mapping
-        st.markdown("### 📐 9. Edge Discontinuity & Seam Gradient Mapping")
-        ed_c1, ed_c2 = st.columns([1, 1.5])
-        with ed_c1:
-            st.markdown("""
-            <div class="param-card">
-                <b>Boundary Seam Verification:</b><br>
-                Calculates blended second-order Laplacian derivatives and Canny edge gradients to detect splicing seams, cut-out artifacts, and unnatural sharpness transitions.
-            </div>
-            """, unsafe_allow_html=True)
-        with ed_c2:
-            st.image(edge_map, caption="Canny + Laplacian Seam Discontinuity Map", use_container_width=True)
+        # 7. PRNU
+        elif "7. PRNU Camera Sensor" in param_choice:
+            st.markdown("### 📡 Photo Response Non-Uniformity (PRNU)")
+            st.caption("Isolates physical camera sensor noise using 5×5 SRM high-pass spatial filtering.")
+            col_l, col_r = st.columns([1, 1.4])
+            with col_l:
+                run_prnu = st.button("🚀 Extract PRNU Fingerprint", use_container_width=True)
+            with col_r:
+                if run_prnu:
+                    st.image(srm_map, caption="SRM High-Pass Sensor Noise Fingerprint", use_container_width=True)
+                else:
+                    st.info("Click '🚀 Extract PRNU Fingerprint' to isolate CMOS sensor noise.")
 
-        # Section 10: Luminance & Lighting Direction Field
-        st.markdown("### ☀️ 10. Luminance & Lighting Angle Direction Vectors")
-        lu_c1, lu_c2 = st.columns([1, 1.5])
-        with lu_c1:
-            st.markdown("""
-            <div class="param-card">
-                <b>Lighting Angle Verification:</b><br>
-                Computes Sobel gradient magnitude and angle fields across the luminance (V) channel to uncover contradictory illumination sources between spliced elements.
-            </div>
-            """, unsafe_allow_html=True)
-        with lu_c2:
-            st.image(luma_map, caption="Sobel Luminance Gradient Vector Field", use_container_width=True)
+        # 8. FREQUENCY
+        elif "8. Frequency Domain" in param_choice:
+            st.markdown("### 📈 Frequency Domain 2D-FFT Power Spectrum")
+            st.caption("Maps spatial data to the frequency domain via Fourier Transform to expose periodic lattice spikes caused by GANs or resampling.")
+            col_l, col_r = st.columns([1, 1.4])
+            with col_l:
+                run_fft = st.button("🚀 Run 2D-FFT Frequency Analysis", use_container_width=True)
+            with col_r:
+                if run_fft:
+                    st.image(fft_map, caption="2D-FFT Magnitude Power Spectrum", use_container_width=True)
+                else:
+                    st.info("Click '🚀 Run 2D-FFT Frequency Analysis' to generate spectral distribution.")
 
-        # Section 11: Deepfake & Face Forensic Seam Analysis
-        st.markdown("### 😄 11. Deepfake & Boundary Blend Forensics")
-        df_c1, df_c2 = st.columns([1, 1.5])
-        with df_c1:
-            st.markdown("""
-            <div class="param-card">
-                <b>Facial Landmark & Blend Diagnostics:</b><br>
-                Evaluates edge smoothness and micro-texture coherence across boundary contours to identify head replacements, face-swaps, and generative boundary blend artifacts.
-            </div>
-            """, unsafe_allow_html=True)
-        with df_c2:
-            st.image(edge_map, caption="Facial Contour & Boundary Blend Map", use_container_width=True)
+        # 9. DEEPFAKE
+        elif "9. Deepfake" in param_choice:
+            st.markdown("### 😄 Deepfake & Boundary Discontinuity")
+            st.caption("Examines blending boundaries and edge discontinuities using second-order Canny-Laplacian gradients to detect AI face swaps.")
+            col_l, col_r = st.columns([1, 1.4])
+            with col_l:
+                run_df = st.button("🚀 Detect Deepfake Seams", use_container_width=True)
+            with col_r:
+                if run_df:
+                    st.image(edge_map, caption="Canny-Laplacian Boundary Discontinuity Map", use_container_width=True)
+                else:
+                    st.info("Click '🚀 Detect Deepfake Seams' to analyze edge blending.")
 
-        # Section 12: Resampling & Spatial Derivatives
-        st.markdown("### 🔀 12. Resampling & Spatial Interpolation Derivatives")
-        re_c1, re_c2 = st.columns([1, 1.5])
-        with re_c1:
-            st.markdown("""
-            <div class="param-card">
-                <b>Interpolation Derivative Analysis:</b><br>
-                Measures spatial derivative variance across pixel lattices to uncover non-uniform geometric stretching, affine rotation, and localized bicubic upscaling.
-            </div>
-            """, unsafe_allow_html=True)
-        with re_c2:
-            st.image(luma_map, caption="Spatial Derivative Interpolation Gradient", use_container_width=True)
+        # 10. RESAMPLING
+        elif "10. Resampling" in param_choice:
+            st.markdown("### 🔀 Resampling & Luminance Gradients")
+            st.caption("Calculates illumination direction fields and derivative vectors across the V-channel to expose contradictory light sources in spliced elements.")
+            col_l, col_r = st.columns([1, 1.4])
+            with col_l:
+                run_resam = st.button("🚀 Detect Resampling & Light Angle", use_container_width=True)
+            with col_r:
+                if run_resam:
+                    st.image(luma_map, caption="Sobel Luminance Angle Vector Field", use_container_width=True)
+                else:
+                    st.info("Click '🚀 Detect Resampling & Light Angle' to compute lighting vectors.")
+
+        # 11. STEGANOGRAPHY
+        elif "11. Steganography" in param_choice:
+            st.markdown("### 🛍️ Steganography & LSB Analysis")
+            st.caption("Extracts Least Significant Bit (LSB) planes across pixel channels. Natural sensor noise presents ~50% random 1s and 0s. Marked deviations indicate covert data hiding.")
+            col_l, col_r = st.columns([1, 1.4])
+            with col_l:
+                run_stego = st.button("🚀 Detect Hidden LSB Payloads", use_container_width=True)
+                if run_stego:
+                    lsb_composite, lsb_ones_pct, stego_risk = compute_steganography_lsb(img_np)
+                    st.metric("LSB Bit-1 Ratio", f"{lsb_ones_pct:.2f}%")
+                    st.metric("Stego Risk Score", f"{stego_risk:.1f}%")
+            with col_r:
+                if run_stego:
+                    st.image(lsb_composite, caption="LSB False-Color Bit Distribution Heatmap", use_container_width=True)
+                else:
+                    st.info("Click '🚀 Detect Hidden LSB Payloads' to analyze bit-plane randomness.")
+
+        # 12. HASH
+        elif "12. Cryptographic" in param_choice:
+            st.markdown("### 🔑 Cryptographic & Perceptual Hash Verification")
+            st.caption("Verify exact bitstream integrity and calculate perceptual similarity hashes for duplicate matching.")
+            col_l, col_r = st.columns([1, 1.4])
+            with col_l:
+                run_hash = st.button("🚀 Compute Cryptographic Hashes", use_container_width=True)
+                if run_hash:
+                    st.markdown("""
+                    <div class="param-card">
+                        <b>Cryptographic Hashes (Exact Match):</b><br>
+                    """, unsafe_allow_html=True)
+                    st.code(f"SHA-256: {hashes['SHA-256']}\nMD5:     {hashes['MD5']}", language="bash")
+                    st.markdown("</div>", unsafe_allow_html=True)
+            with col_r:
+                if run_hash:
+                    st.markdown("""
+                    <div class="param-card">
+                        <b>Perceptual Hashes (Visual Resemblance):</b><br>
+                    """, unsafe_allow_html=True)
+                    st.code(f"dHash (Difference): {hashes['dHash']}\naHash (Average):    {hashes['aHash']}", language="bash")
+                    st.markdown("</div>", unsafe_allow_html=True)
+                else:
+                    st.info("Click '🚀 Compute Cryptographic Hashes' to generate digests.")
 
     # --------------------------------------------------------
     # TAB 3: History Audit
