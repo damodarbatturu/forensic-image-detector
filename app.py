@@ -24,7 +24,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Dark Forensics & Button Color Styling
+# Dark Forensics & Report Styling
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
@@ -58,7 +58,7 @@ st.markdown("""
         100% { transform: scale(1); filter: drop-shadow(0 0 2px #38bdf8); }
     }
 
-    /* Laser Scanner Frame */
+    /* Animated Laser Scanning HUD */
     .laser-scan-frame {
         position: relative;
         overflow: hidden;
@@ -143,11 +143,7 @@ st.markdown("""
         box-shadow: 0 0 22px rgba(56, 189, 248, 0.6) !important;
         transform: translateY(-1px) !important;
     }
-    div[data-testid="stButton"] > button:active {
-        transform: translateY(1px) !important;
-    }
 
-    /* Sidebar Cards */
     .sidebar-header-card {
         background: linear-gradient(135deg, rgba(15, 23, 42, 0.85) 0%, rgba(30, 41, 59, 0.6) 100%);
         border: 1px solid rgba(56, 189, 248, 0.3);
@@ -412,8 +408,16 @@ def extract_solid_silhouette_mask(pred_mask, srm_raw, ela_raw, orig_w, orig_h, s
             _, gt_bin = cv2.threshold(gt_resized, 127, 255, cv2.THRESH_BINARY)
             return gt_bin
 
-    n_norm = cv2.normalize(pred_mask, None, 0.0, 1.0, cv2.NORM_MINMAX)
-    s_norm = cv2.normalize(cv2.resize(srm_raw, (orig_w, orig_h)), None, 0.0, 1.0, cv2.NORM_MINMAX)
+    # Ensure all inputs are 2D single-channel float arrays
+    if len(pred_mask.shape) == 3:
+        pred_mask = cv2.cvtColor(pred_mask, cv2.COLOR_RGB2GRAY)
+    if len(srm_raw.shape) == 3:
+        srm_raw = cv2.cvtColor(srm_raw, cv2.COLOR_RGB2GRAY)
+    if len(ela_raw.shape) == 3:
+        ela_raw = cv2.cvtColor(ela_raw.astype(np.uint8), cv2.COLOR_RGB2GRAY)
+
+    n_norm = cv2.normalize(pred_mask.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
+    s_norm = cv2.normalize(cv2.resize(srm_raw.astype(np.float32), (orig_w, orig_h)), None, 0.0, 1.0, cv2.NORM_MINMAX)
     e_norm = cv2.normalize(cv2.resize(ela_raw.astype(np.float32), (orig_w, orig_h)), None, 0.0, 1.0, cv2.NORM_MINMAX)
 
     fusion = (n_norm * 0.50) + (s_norm * 0.25) + (e_norm * 0.25)
@@ -702,16 +706,16 @@ if selected_img is not None:
     pred_mask = cv2.resize(raw_mask_pred, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
     is_tampered = dl_conf >= threshold or ("forged" in sample_name.lower())
 
-    # Precompute transforms
+    # Precompute transforms (ensuring 2D grayscale for mask calculation)
     srm_map, srm_raw = compute_srm(img_np)
-    ela_default, _ = compute_ela(selected_img, quality=90, scale=20)
+    ela_default, ela_default_raw = compute_ela(selected_img, quality=ela_q, scale=20)
     fft_map = compute_fft(img_np)
     edge_map = compute_edges(img_np)
     luma_map = compute_luminance_gradient(img_np)
 
     if is_tampered:
         mask_forged = extract_solid_silhouette_mask(
-            pred_mask, srm_raw, ela_default.astype(np.float32), orig_w, orig_h,
+            pred_mask, srm_raw, ela_default_raw, orig_w, orig_h,
             sensitivity=mask_sensitivity, paired_mask_path=paired_mask_path
         )
         tampered_pixels = np.count_nonzero(mask_forged)
@@ -854,7 +858,7 @@ if selected_img is not None:
             st.markdown('<div class="tile-caption">Red highlighted bounding box localization.</div>', unsafe_allow_html=True)
 
     # --------------------------------------------------------
-    # TAB 2: Diagnostic Parameters (All 12 Modalities Side-by-Side)
+    # TAB 2: On-Demand Interactive Diagnostic Parameters (ALL 12 VISIBLE SIDE-BY-SIDE)
     # --------------------------------------------------------
     with param_tab:
         st.subheader("🔬 Comprehensive Parameter Diagnostics (12 Modalities)")
@@ -1045,7 +1049,7 @@ if selected_img is not None:
                 st.metric("LSB Bit-1 Ratio", f"{lsb_ones_pct:.2f}%")
                 st.metric("Stego Risk Score", f"{stego_risk:.1f}%")
                 st.caption("Natural sensor noise presents ~50% random 1s and 0s. Marked deviations indicate covert data hiding.")
-                st.button("🚀 Detect Hidden LSB Payloads", key="btn_run_stego", use_container_width=True)
+                st.button("🚀 Re-Evaluate LSB Bits", key="btn_run_stego", use_container_width=True)
             with col_r:
                 st.image(lsb_composite, caption="LSB False-Color Bit Distribution Heatmap", use_container_width=True)
 
