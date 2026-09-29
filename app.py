@@ -24,10 +24,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Dark Forensics & Report Styling
+# Dark Forensics & High-Contrast Cyber Styling
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
     
     html, body, [class*="css"] {
         font-family: 'Plus Jakarta Sans', sans-serif;
@@ -58,14 +58,73 @@ st.markdown("""
         100% { transform: scale(1); filter: drop-shadow(0 0 2px #38bdf8); }
     }
 
-    /* HIGH-CONTRAST CLICKABLE BUTTONS & DOWNLOAD BOXES */
+    /* HIGH-CONTRAST & ATTRACTIVE PARAMETER TAB HEADINGS */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 10px !important;
+        background: rgba(15, 23, 42, 0.95) !important;
+        padding: 10px 14px !important;
+        border-radius: 12px !important;
+        border: 1px solid rgba(56, 189, 248, 0.35) !important;
+        overflow-x: auto !important;
+        white-space: nowrap !important;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6) !important;
+    }
+
+    /* Unselected Tab Pills */
+    .stTabs [data-baseweb="tab"] {
+        padding: 9px 16px !important;
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 0.86rem !important;
+        font-weight: 700 !important;
+        color: #f1f5f9 !important;
+        border-radius: 8px !important;
+        background: rgba(30, 41, 59, 0.85) !important;
+        border: 1.5px solid rgba(56, 189, 248, 0.35) !important;
+        transition: all 0.25s ease-in-out !important;
+    }
+
+    /* Force all child labels inside the tabs to be bright and clear */
+    .stTabs [data-baseweb="tab"] p,
+    .stTabs [data-baseweb="tab"] span,
+    .stTabs [data-baseweb="tab"] div {
+        color: #f1f5f9 !important;
+        font-weight: 700 !important;
+    }
+
+    /* Hover State on Tab Pills */
+    .stTabs [data-baseweb="tab"]:hover {
+        color: #38bdf8 !important;
+        background: rgba(56, 189, 248, 0.22) !important;
+        border-color: #38bdf8 !important;
+        box-shadow: 0 0 16px rgba(56, 189, 248, 0.5) !important;
+        transform: translateY(-2px) !important;
+    }
+    .stTabs [data-baseweb="tab"]:hover p,
+    .stTabs [data-baseweb="tab"]:hover span {
+        color: #38bdf8 !important;
+    }
+
+    /* Selected / Active Tab Pill */
+    .stTabs [aria-selected="true"] {
+        color: #22c55e !important;
+        background: linear-gradient(135deg, rgba(34, 197, 94, 0.25) 0%, rgba(15, 23, 42, 0.95) 100%) !important;
+        border: 2px solid #22c55e !important;
+        box-shadow: 0 0 20px rgba(34, 197, 94, 0.5) !important;
+        font-weight: 800 !important;
+        transform: translateY(-1px) !important;
+    }
+    .stTabs [aria-selected="true"] p,
+    .stTabs [aria-selected="true"] span {
+        color: #22c55e !important;
+        font-weight: 800 !important;
+    }
+
+    /* HIGH-CONTRAST CLICKABLE BUTTONS */
     button,
     div[data-testid="stButton"] > button,
     div[data-testid="stDownloadButton"] > button,
     .stButton > button,
-    .stDownloadButton > button,
-    [data-testid="baseButton-secondary"],
-    [data-testid="baseButton-primary"] {
+    .stDownloadButton > button {
         background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%) !important;
         color: #38bdf8 !important;
         border: 1.5px solid #38bdf8 !important;
@@ -81,18 +140,14 @@ st.markdown("""
     button span,
     button *,
     div[data-testid="stButton"] > button *,
-    div[data-testid="stDownloadButton"] > button *,
-    .stButton > button *,
-    .stDownloadButton > button * {
+    div[data-testid="stDownloadButton"] > button * {
         color: #38bdf8 !important;
         font-weight: 700 !important;
     }
 
     button:hover,
     div[data-testid="stButton"] > button:hover,
-    div[data-testid="stDownloadButton"] > button:hover,
-    .stButton > button:hover,
-    .stDownloadButton > button:hover {
+    div[data-testid="stDownloadButton"] > button:hover {
         background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%) !important;
         color: #ffffff !important;
         border-color: #7dd3fc !important;
@@ -139,37 +194,6 @@ st.markdown("""
         border: 1px solid rgba(56, 189, 248, 0.5);
         z-index: 11;
         letter-spacing: 1px;
-    }
-
-    /* Horizontal Veritas-Style Sub-Tabs */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 6px;
-        background-color: rgba(15, 23, 42, 0.90);
-        padding: 6px 12px;
-        border-radius: 10px;
-        border: 1px solid rgba(56, 189, 248, 0.25);
-        overflow-x: auto;
-        white-space: nowrap;
-    }
-    .stTabs [data-baseweb="tab"] {
-        padding: 6px 12px;
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 0.80rem;
-        font-weight: 600;
-        color: #94a3b8;
-        border-radius: 6px;
-        background: transparent;
-        border: none;
-    }
-    .stTabs [data-baseweb="tab"]:hover {
-        color: #38bdf8;
-        background: rgba(56, 189, 248, 0.08);
-    }
-    .stTabs [aria-selected="true"] {
-        color: #22c55e !important;
-        border-bottom: 2.5px solid #22c55e !important;
-        background: rgba(34, 197, 94, 0.1) !important;
-        font-weight: 700 !important;
     }
 
     .sidebar-header-card {
@@ -733,9 +757,9 @@ if selected_img is not None:
     pred_mask = cv2.resize(raw_mask_pred, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
     is_tampered = dl_conf >= threshold or ("forged" in sample_name.lower())
 
-    # Precompute transforms
+    # Auxiliary Physical Transforms for Stage 1
     srm_map, srm_raw = compute_srm(img_np)
-    ela_default, ela_default_raw = compute_ela(selected_img, quality=ela_q, scale=20)
+    ela_default, ela_default_raw = compute_ela(selected_img, quality=ela_q)
     fft_map = compute_fft(img_np)
     edge_map = compute_edges(img_np)
     luma_map = compute_luminance_gradient(img_np)
@@ -881,7 +905,7 @@ if selected_img is not None:
             st.markdown('<div class="tile-caption">Red highlighted bounding box localization.</div>', unsafe_allow_html=True)
 
     # --------------------------------------------------------
-    # TAB 2: On-Demand Interactive Diagnostic Parameters (NO DEFAULT RESULTS - USER TRIGGERS)
+    # TAB 2: On-Demand Interactive Diagnostic Parameters
     # --------------------------------------------------------
     with param_tab:
         st.subheader("🔬 Comprehensive Parameter Diagnostics (12 Modalities)")
