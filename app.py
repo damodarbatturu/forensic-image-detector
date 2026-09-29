@@ -3,9 +3,10 @@ import io
 import cv2
 import time
 import torch
+import hashlib
 import numpy as np
 from datetime import datetime
-from PIL import Image, ImageChops, ImageEnhance
+from PIL import Image, ImageChops, ImageEnhance, ExifTags
 import streamlit as st
 from model import DualStreamForgeryDetector
 
@@ -92,7 +93,7 @@ st.markdown("""
         letter-spacing: 1px;
     }
 
-    /* Sidebar Components */
+    /* Sidebar Cards */
     .sidebar-header-card {
         background: linear-gradient(135deg, rgba(15, 23, 42, 0.85) 0%, rgba(30, 41, 59, 0.6) 100%);
         border: 1px solid rgba(56, 189, 248, 0.3);
@@ -179,20 +180,137 @@ st.markdown("""
         text-align: center;
     }
 
-    /* Technique Description Box */
-    .technique-modal-box {
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid #38bdf8;
+    .param-card {
+        background: rgba(15, 23, 42, 0.8);
+        border: 1px solid rgba(56, 189, 248, 0.25);
         border-radius: 10px;
         padding: 14px;
-        margin-top: 12px;
-        box-shadow: 0 4px 20px rgba(56, 189, 248, 0.2);
+        margin-bottom: 14px;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ------------------------------------------------------------
-# 1. Forensic Processing Functions
+# 1. Advanced Forensic Parameter Computation Functions
+# ------------------------------------------------------------
+def compute_hashes(img_bytes, img_pil):
+    # Cryptographic Hashes
+    sha256 = hashlib.sha256(img_bytes).hexdigest()
+    md5 = hashlib.md5(img_bytes).hexdigest()
+    
+    # Perceptual Difference Hash (dHash)
+    resized_d = img_pil.convert('L').resize((9, 8), Image.Resampling.LANCZOS)
+    arr_d = np.array(resized_d)
+    diff = arr_d[:, 1:] > arr_d[:, :-1]
+    dhash = sum([2 ** i for (i, v) in enumerate(diff.flatten()) if v])
+    dhash_hex = f"{dhash:016x}"
+
+    # Perceptual Average Hash (aHash)
+    resized_a = img_pil.convert('L').resize((8, 8), Image.Resampling.LANCZOS)
+    arr_a = np.array(resized_a)
+    avg = arr_a.mean()
+    abool = arr_a > avg
+    ahash = sum([2 ** i for (i, v) in enumerate(abool.flatten()) if v])
+    ahash_hex = f"{ahash:016x}"
+
+    return {
+        "SHA-256": sha256,
+        "MD5": md5,
+        "dHash": dhash_hex,
+        "aHash": ahash_hex
+    }
+
+def extract_metadata(img_pil):
+    exif_data = {}
+    suspicious_tags = []
+    has_exif = False
+
+    raw_exif = img_pil._getexif() if hasattr(img_pil, '_getexif') and img_pil._getexif() else None
+    if raw_exif:
+        has_exif = True
+        for tag_id, val in raw_exif.items():
+            tag_name = ExifTags.TAGS.get(tag_id, str(tag_id))
+            val_str = str(val)
+            exif_data[tag_name] = val_str
+            # Check for known editor software fingerprints
+            if tag_name.lower() in ["software", "processingsoftware", "imagehistory"]:
+                for kw in ["photoshop", "gimp", "canva", "lightroom", "paint.net", "snapseed"]:
+                    if kw in val_str.lower():
+                        suspicious_tags.append(f"Editor Detected: {val_str} (in {tag_name})")
+    
+    status = "Authentic EXIF Stream" if (has_exif and not suspicious_tags) else ("Editor Signatures Found" if suspicious_tags else "Metadata Stripped / Missing")
+    return {
+        "status": status,
+        "has_exif": has_exif,
+        "tags": exif_data,
+        "alerts": suspicious_tags
+    }
+
+def compute_steganography_lsb(img_np):
+    # Extract Bit 0 (LSB) across all channels
+    lsb_planes = (img_np & 1) * 255
+    r_lsb = lsb_planes[:, :, 0]
+    g_lsb = lsb_planes[:, :, 1]
+    b_lsb = lsb_planes[:, :, 2]
+
+    # Calculate 1s vs 0s distribution across LSB
+    ones_ratio = (np.count_nonzero(r_lsb == 255) / r_lsb.size) * 100.0
+    # Natural image LSB distribution stays roughly around 50%
+    bias = abs(ones_ratio - 50.0)
+    risk_score = min(100.0, bias * 5.0)
+
+    # False color visual heatmap of LSB plane
+    lsb_composite = cv2.applyColorMap(r_lsb.astype(np.uint8), cv2.COLORMAP_JET)
+    lsb_composite = cv2.cvtColor(lsb_composite, cv2.COLOR_BGR2RGB)
+
+    return lsb_composite, ones_ratio, risk_score
+
+def compute_cmfd_keypoints(img_np):
+    # Copy-Move Forgery Detection using ORB Keypoints
+    gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
+    orb = cv2.ORB_create(nfeatures=800)
+    kp, des = orb.detectAndCompute(gray, None)
+    
+    vis = img_np.copy()
+    match_count = 0
+    if des is not None and len(kp) > 10:
+        bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
+        matches = bf.knnMatch(des, des, k=2)
+        
+        for m, n in matches:
+            if m.distance < 0.65 * n.distance:
+                pt1 = tuple(np.round(kp[m.queryIdx].pt).astype(int))
+                pt2 = tuple(np.round(kp[m.trainIdx].pt).astype(int))
+                # Exclude trivial identical self-matches
+                dist = np.hypot(pt1[0] - pt2[0], pt1[1] - pt2[1])
+                if dist > 35:
+                    cv2.line(vis, pt1, pt2, (0, 255, 255), 2)
+                    cv2.circle(vis, pt1, 4, (255, 0, 0), -1)
+                    cv2.circle(vis, pt2, 4, (0, 0, 255), -1)
+                    match_count += 1
+
+    return vis, match_count
+
+def extract_quantization_tables(img_pil):
+    tables = getattr(img_pil, 'quantization', None)
+    if tables:
+        return {k: np.array(v).reshape((8, 8)) for k, v in tables.items()}
+    return None
+
+def compute_histogram_metrics(img_np):
+    hists = {}
+    clipping_flags = []
+    for idx, col in enumerate(["Red", "Green", "Blue"]):
+        h, _ = np.histogram(img_np[:, :, idx], bins=256, range=(0, 256))
+        hists[col] = h
+        if h[0] > (img_np.shape[0] * img_np.shape[1] * 0.05):
+            clipping_flags.append(f"{col} Channel Shadow Clipping (Pure Black spike)")
+        if h[255] > (img_np.shape[0] * img_np.shape[1] * 0.05):
+            clipping_flags.append(f"{col} Channel Highlight Clipping (Pure White spike)")
+    return hists, clipping_flags
+
+# ------------------------------------------------------------
+# 2. Forensic Multi-Spectral Processing Functions
 # ------------------------------------------------------------
 def compute_srm(img_np):
     kernel = np.array([[-1, 2, -2, 2, -1],
@@ -307,7 +425,7 @@ def draw_red_bounding_boxes(base_img, binary_mask):
     return output_img, box_count
 
 # ------------------------------------------------------------
-# 2. PDF Report Generator (ReportLab)
+# 3. PDF Compliance Report Generator
 # ------------------------------------------------------------
 def generate_pdf_report(case_dict):
     pdf_buffer = io.BytesIO()
@@ -343,6 +461,8 @@ def generate_pdf_report(case_dict):
         ["Neural Tamper Score", f"{case_dict['confidence']}%"],
         ["Manipulated Area", f"{case_dict['tampered_pct']}%"],
         ["Identified Forgery Zones", f"{case_dict['boxes_found']} Detected Region(s)"],
+        ["SHA-256 Digest", case_dict.get("hashes", {}).get("SHA-256", "N/A")[:24] + "..."],
+        ["Metadata Status", case_dict.get("meta_status", "N/A")],
         ["Native Resolution", case_dict["resolution"]]
     ]
     summary_table = Table(table_data, colWidths=[2.5 * 72, 4.0 * 72])
@@ -366,7 +486,8 @@ def generate_pdf_report(case_dict):
         ["Phase 2", "Error Level Analysis (ELA)", "Quantifies compression history divergence at 90% JPEG quality."],
         ["Phase 3", "2D-FFT Power Spectrum", "Identifies periodic spikes caused by generative or resampling grids."],
         ["Phase 4", "Edge Discontinuity Mapping", "Exposes boundary seams using second-order Canny-Laplacian gradients."],
-        ["Phase 5", "Convex Hull Segmentation", "Extracts solid silhouette masks and calculates altered surface area."]
+        ["Phase 5", "Convex Hull Segmentation", "Extracts solid silhouette masks and calculates altered surface area."],
+        ["Phase 6", "Cryptographic Provenance", "Generates SHA-256 bitstream fingerprints and perceptual hashes."]
     ]
     steps_table = Table(steps_data, colWidths=[1.1 * 72, 2.2 * 72, 3.2 * 72])
     steps_table.setStyle(TableStyle([
@@ -412,7 +533,7 @@ def generate_pdf_report(case_dict):
     return pdf_buffer.getvalue()
 
 # ------------------------------------------------------------
-# 3. Model Loader
+# 4. Model Loader
 # ------------------------------------------------------------
 if "forensic_history" not in st.session_state:
     st.session_state["forensic_history"] = []
@@ -433,297 +554,7 @@ def load_detector():
 model = load_detector()
 
 # ------------------------------------------------------------
-# 4. Comprehensive Technique Knowledge Base
-# ------------------------------------------------------------
-TECHNIQUE_DATA = {
-    "ELA": {
-        "title": "🕵️ Error Level Analysis (ELA)",
-        "content": """
-**What is ELA?**
-Error Level Analysis is like a detective looking for touch-ups in a photograph. When you edit a digital image and save it as JPEG, the edited areas compress differently than the original areas. ELA highlights these compression differences to reveal potential manipulations.
-Think of it like this: Imagine a painting where some areas have been repainted. The new paint (edited regions) will look slightly different from the old paint (original regions) under special lighting. ELA is that "special lighting" for digital images.
-
-**What Does ELA Measure?**
-* Compression inconsistencies across the image
-* Difference in error levels between original and edited regions
-* Block-level anomalies in 8×8 JPEG compression blocks
-* Noise patterns that deviate from camera sensor characteristics
-
-**How to Interpret Results:**
-* **✅ Normal Patterns (Likely Authentic):** Uniform brightness across the entire ELA image, consistent error levels in similar texture regions, natural noise distribution matching camera characteristics, low overall error scores (typically < 20).
-* **⚠️ Suspicious Patterns (Possible Manipulation):** Bright spots or regions standing out dramatically, sharp boundaries between high and low error areas, inconsistent compression in regions that should be similar, geometric shapes with different error levels than surroundings, high error scores (> 30) in specific regions.
-
-**Common Artifacts Detected:**
-* **Copy-Paste Forgeries:** Pasted regions show different compression levels; bright outlines appear around inserted objects.
-* **Content Addition/Removal:** Edited areas glow brighter than untouched regions ("halo effects").
-* **Splicing Attacks:** Images combined from multiple sources show distinct error level boundaries.
-* **Enhancement Filters:** Sharpening, blurring, or color adjustments create elevated error patterns.
-* **Cloning/Stamp Tool:** Cloned regions show different error levels than source with repeating variations.
-
-**Visual Analogy:**
-Imagine you have a document that's been photocopied multiple times:
-* Original text (never edited) = uniform, consistent quality
-* Whited-out and retyped sections = obvious differences in ink darkness
-* Cut-and-paste sections = visible boundaries and quality mismatches
-
-**Limitations & Best Practices:**
-* Text overlays and high-contrast edges often glow bright naturally.
-* Highly textured areas (grass, fabric) show naturally elevated error levels.
-* Always compare ELA with metadata, noise analysis, and copy-move detection.
-"""
-    },
-    "Metadata": {
-        "title": "📋 Metadata Analysis",
-        "content": """
-**What is Metadata?**
-Metadata is the "birth certificate" of a digital image – hidden information embedded in the file that tells the story of how, when, and where the photo was created. This data is automatically recorded by cameras and editing software but can reveal tampering.
-Think of metadata like invisible ink on the back of a photograph recording camera settings, timestamps, GPS coordinates, and software tags.
-
-**What Does Metadata Measure?**
-* **EXIF Data:** Camera settings (ISO, aperture, shutter speed, focal length).
-* **Device Information:** Camera make, model, serial number.
-* **Timestamps:** Creation date, modification date, digitization date.
-* **GPS Coordinates:** Location where photo was taken.
-* **Software Tags:** Editing tools that processed the image (Photoshop, GIMP, Canva).
-* **Thumbnail Data:** Embedded preview image comparisons.
-
-**How to Interpret Results:**
-* **✅ Normal Patterns:** Consistent timestamps (creation = modification time), full camera manufacturer data present, valid GPS, and thumbnail matching the main frame.
-* **⚠️ Suspicious Patterns:** Completely stripped metadata, software signatures from photo editors, timestamp anomalies (modified before created), impossible camera parameters (ISO 0), or visual mismatch between thumbnail and main frame.
-
-**Limitations & Best Practices:**
-* Metadata can be faked or manually altered by sophisticated tools.
-* Social media platforms routinely strip metadata for user privacy.
-* Screenshots and messaging apps naturally lack original camera EXIF data.
-* Cross-reference metadata with visual scene lighting, shadows, and weather.
-"""
-    },
-    "Histogram": {
-        "title": "📊 Histogram Analysis",
-        "content": """
-**What is Histogram Analysis?**
-A histogram is like a "census of pixels" – it counts how many pixels in an image have each brightness or color level. By analyzing these distributions, we can detect unnatural patterns created by image manipulation.
-Natural photos have smooth, bell-curve-like distributions, while edited photos introduce gaps, spikes, or unnatural cutoffs.
-
-**What Does Histogram Analysis Measure?**
-* Pixel distribution across brightness levels (0–255).
-* Color channel balance (Red, Green, Blue separately).
-* Histogram gaps (missing brightness values) and spikes.
-* Comb patterns (regular gaps suggesting heavy editing/posterization).
-* Clipping at extremes (pure black 0 or pure white 255).
-
-**How to Interpret Results:**
-* **✅ Normal Patterns:** Smooth, continuous curves across the spectrum; balanced RGB channels.
-* **⚠️ Suspicious Patterns:**
-  * **Comb Pattern:** Regular vertical gaps indicating aggressive levels/curves adjustment or repeated re-saving.
-  * **Spikes at Specific Values:** Tall, narrow peaks from contrast stretching or cloning.
-  * **Clipping:** Histogram slamming into 0 or 255, losing detail.
-  * **Bimodal Distributions:** Two distinct peaks suggesting splicing from different sources.
-
-**Limitations & Best Practices:**
-* High-contrast scenes (sunsets, spotlights) naturally produce unusual distributions.
-* Check all three color channels (R, G, B) rather than brightness alone.
-"""
-    },
-    "Noise": {
-        "title": "👻 Noise Analysis & JPEG Ghost Detection",
-        "content": """
-**What is Noise Analysis?**
-Digital noise is the "fingerprint" of a camera sensor – every sensor produces a unique pattern of random pixel variations. When content is added from different sources, the noise patterns will not match, revealing the forgery.
-JPEG Ghost Detection looks for faint outlines that appear when an image is saved across multiple compression qualities.
-
-**What Does It Measure?**
-* Sensor noise consistency and local noise variance across different regions.
-* Quality mismatches between foreground and background.
-* Ghost boundaries where new elements were inserted.
-* Double-compression signatures.
-
-**How to Interpret Results:**
-* **✅ Normal Patterns:** Uniform noise distribution, consistent noise in similar lighting, higher noise in shadows and lower in highlights, minimal ghosting.
-* **⚠️ Suspicious Patterns:** Regions that are unnaturally smooth (denoised or AI-generated), dark areas with less noise than bright areas, and visible ghost outlines appearing at specific JPEG quality re-compressions.
-
-**Common Artifacts Detected:**
-* Splicing and composite images with mismatched grain.
-* Content-aware fill creating unnaturally smooth, noise-free patches.
-* AI-generated content displaying mathematically uniform noise signatures.
-"""
-    },
-    "Quantization": {
-        "title": "💾 Quantization Table Analysis",
-        "content": """
-**What is a Quantization Table?**
-The quantization table is the "recipe" JPEG uses to compress images. It is an 8×8 grid of numbers that tells the compression algorithm how much to simplify different frequencies. Every camera brand and software editor uses unique recipes.
-
-**What Does It Measure?**
-* 8×8 quantization matrix coefficients.
-* JPEG quality level estimation (0–100).
-* Single vs. double compression history.
-* Software signatures matching known camera or software profiles.
-
-**How to Interpret Results:**
-* **✅ Normal Patterns:** Clean quantization table matching camera manufacturer, single compression signature, and quality level appropriate for the capture device.
-* **⚠️ Suspicious Patterns:**
-  * **Double Compression:** Evidence of two overlapping quantization tables (e.g., Canon EOS Q=95 re-saved in Photoshop at Q=85).
-  * **Software Mismatch:** Table points to Photoshop/GIMP despite claims of an unedited camera capture.
-  * **Inconsistent Tables:** Different parts of the image show differing quantization tables, indicating splicing.
-
-**Practical Tips:**
-* Lower table numbers = less compression (higher quality).
-* Double compression is one of the strongest technical indicators of post-processing.
-"""
-    },
-    "CMFD": {
-        "title": "🔄 Copy-Move Forgery Detection (CMFD)",
-        "content": """
-**What is Copy-Move Forgery Detection?**
-Copy-move forgery occurs when one part of an image is copied and pasted elsewhere within the same frame to hide, duplicate, or alter content. CMFD compares 8×8 blocks and keypoint descriptors (SIFT/ORB) to find suspiciously identical regions.
-
-**What Does CMFD Measure?**
-* Block similarities across 8×8 pixel grids.
-* Feature matching and spatial relationships between matching regions.
-* Rotated, scaled, or skewed duplicate copies.
-* DCT coefficient matching for JPEG images.
-
-**How to Interpret Results:**
-* **✅ Normal Patterns:** No matching block clusters; natural, random variations in repetitive textures (leaves, tiles, brickwork).
-* **⚠️ Suspicious Patterns:** Exact duplicate block matches, large geometric clusters of matching features, and sharp boundary discontinuities around cloned objects.
-
-**Limitations & Best Practices:**
-* Natural scene repetitions (brick patterns, repeating waves) can trigger false positives.
-* Look for unnatural clustering and edge blurring around the pasted elements.
-"""
-    },
-    "PRNU": {
-        "title": "📡 PRNU Analysis (Photo Response Non-Uniformity)",
-        "content": """
-**What is PRNU Analysis?**
-PRNU is the physical fingerprint of a camera sensor. Microscopic manufacturing defects in silicon create a unique, invisible pattern in every photo taken by that sensor. It is the digital equivalent of ballistic striations on a bullet.
-
-**What Does PRNU Measure?**
-* Physical sensor manufacturing imperfections.
-* Pixel-level light sensitivity variations.
-* Hardware-specific noise patterns extracted via high-pass filtering (e.g., 5×5 SRM filters).
-* Device matching against reference image databases.
-
-**How to Interpret Results:**
-* **✅ Normal Patterns:** Strong correlation score (> 0.010) matching a single camera sensor across the entire frame.
-* **⚠️ Suspicious Patterns:** Multiple distinct PRNU patterns in different regions (composite images from different cameras), low overall correlation (< 0.005), or pasted content lacking sensor fingerprinting.
-
-**Practical Considerations:**
-* RAW images and high-resolution camera originals preserve PRNU best.
-* Social media compression and aggressive downscaling severely degrade sensor fingerprint signals.
-"""
-    },
-    "Frequency": {
-        "title": "📈 Frequency Domain Analysis (FFT & DCT)",
-        "content": """
-**What is Frequency Domain Analysis?**
-Frequency analysis examines images in frequency space rather than pixel space:
-* **FFT (Fast Fourier Transform):** Breaks down an image into frequency components, measuring the balance between smooth areas and sharp detail.
-* **DCT (Discrete Cosine Transform):** Analyzes 8×8 JPEG compression blocks and coefficient distributions.
-
-**What Does It Measure?**
-* High-frequency content (edges, fine detail, noise) vs. low-frequency content (smooth gradients).
-* Spectral uniformity and periodic spikes caused by artificial resampling.
-* Block-level quantization consistency.
-
-**How to Interpret Results:**
-* **✅ Normal Patterns:** Natural balance of high and low frequencies; smooth energy distribution without isolated spikes; authenticity score > 75.
-* **⚠️ Suspicious Patterns:**
-  * **Excessive High Frequencies:** Starburst or spiky halos indicating artificial over-sharpening.
-  * **Unnatural Smoothness:** Abnormally low high-frequency content characteristic of AI generation.
-  * **Periodic Grid Spikes:** Symmetrical frequency spikes indicating interpolation, upscaling, or GAN generation lattices.
-"""
-    },
-    "Deepfake": {
-        "title": "😄 Deepfake & Face Forensics",
-        "content": """
-**What is Deepfake Detection?**
-Deepfake detection analyzes facial landmarks, corneal reflections, texture coherence, and biological consistency to identify AI-generated or manipulated faces.
-
-**What Does It Measure?**
-* Facial feature symmetry and biological feasibility.
-* Eye reflection consistency (corneal highlight alignment).
-* Skin micro-texture (presence of pores vs. plastic AI smoothness).
-* Edge blending and boundary artifacts around the jawline and hairline.
-* In video: blink rate, gaze tracking, and temporal flickering.
-
-**How to Interpret Results:**
-* **✅ Normal Patterns:** Natural skin texture with pores and wrinkles, matching light reflections in both pupils, biologically plausible facial proportions.
-* **⚠️ Suspicious Patterns:** Unnaturally smooth, plastic-like skin texture, mismatched pupil reflections, warping around facial contours, and boundary blur along the jawline or hair.
-
-**Best Practices:**
-* Evaluate facial feature proportions against natural anatomical ranges.
-* Combine facial analysis with frequency domain checks to detect generative artifacts.
-"""
-    },
-    "Resampling": {
-        "title": "🔀 Resampling & Interpolation Detection",
-        "content": """
-**What is Resampling Detection?**
-Resampling occurs when an image or patch is scaled up, down, or rotated. Interpolation algorithms (nearest neighbor, bilinear, bicubic) create new pixels in mathematically predictable periodic patterns.
-
-**What Does It Measure?**
-* Periodic pixel interpolation derivatives (via Radon transforms / p-map analysis).
-* Scaling and rotation factors applied to image patches.
-* Directional interpolation artifacts (horizontal vs. vertical stretching).
-
-**How to Interpret Results:**
-* **✅ Normal Patterns:** Absence of periodic derivative artifacts; uniform resolution across all image regions.
-* **⚠️ Suspicious Patterns:**
-  * **Region-Specific Resampling:** Foreground object shows upscaling artifacts while the background is at native resolution.
-  * **Directional Artifacts:** Horizontal or vertical periodic patterns indicating non-uniform stretching.
-  * **Blocky Nearest-Neighbor Artifacts:** Visible stair-stepping on enlarged low-resolution elements.
-
-**Limitations:**
-* Subsequent JPEG compressions and blur filters can partially mask resampling patterns.
-"""
-    },
-    "Steganography": {
-        "title": "🛍️ Steganography Analysis",
-        "content": """
-**What is Steganography?**
-Steganography is the practice of concealing secret data inside ordinary files. Unlike encryption, which scrambles data, steganography hides the very existence of the data by altering the Least Significant Bits (LSB) of pixels.
-
-**What Does It Measure?**
-* LSB plane bit-distribution across RGB channels.
-* Chi-square statistical randomness tests.
-* Block-based entropy deviations.
-
-**How to Interpret Results:**
-* **✅ Normal Patterns:** Natural LSB distributions (~50/50 ratio with expected variance); p-value > 0.05.
-* **⚠️ Suspicious Patterns:** Uneven bit distributions, localized high-entropy regions, sharp chi-square p-value drops (< 0.05), or one color channel behaving drastically differently from the others.
-
-**Key Caveats:**
-* Heavy JPEG compression destroys LSB payloads.
-* This tool assesses statistical likelihood of hidden payloads; extracting the underlying message requires the corresponding cryptographic key and extraction algorithm.
-"""
-    },
-    "Hash": {
-        "title": "🔑 Cryptographic & Perceptual Hash Verification",
-        "content": """
-**What is Hash Verification?**
-Hash verification creates unique digital signatures to evaluate file integrity:
-* **Cryptographic Hash (SHA-256):** Produces a 64-character hexadecimal digest. Modifying even a single pixel completely alters the output.
-* **Perceptual Hash (pHash, dHash, aHash):** Generates structural fingerprints resilient to minor resizing or compression.
-
-**What Does It Measure?**
-* **SHA-256:** Byte-for-byte exact file integrity.
-* **Hamming Distance:** Bit difference between perceptual hashes:
-  * 0–5 bits: Nearly identical image (minor compression/resize).
-  * 6–10 bits: Moderate edits or slight cropping.
-  * 11–15 bits: Significant structural alteration.
-  * 16+ bits: Substantially different image.
-
-**Best Practices:**
-* Use SHA-256 for legal chain of custody and bitstream verification.
-* Use perceptual hashes to match resized, format-converted, or slightly compressed variants of registered evidence.
-"""
-    }
-}
-
-# ------------------------------------------------------------
-# 5. Animated Sidebar Controls
+# 5. Sidebar Controls
 # ------------------------------------------------------------
 with st.sidebar:
     st.markdown("""
@@ -732,13 +563,14 @@ with st.sidebar:
             <span class="pulsing-shield">🛡️</span> Multi-Spectral Forensics
         </div>
         <div style="font-size:0.75rem; color:#94a3b8; margin-top:4px;">
-            Deep Learning + Solid Mask Suite
+            Deep Learning + 12 Diagnostic Parameters
         </div>
     </div>
     """, unsafe_allow_html=True)
 
     mode = st.radio("Source Mode", ["Preset Case Evidence", "Upload Custom Image"])
     selected_img = None
+    raw_file_bytes = None
     sample_name = "custom_upload.png"
     paired_mask_path = None
 
@@ -752,7 +584,9 @@ with st.sidebar:
                 samples[f"✅ [Authentic] {f}"] = os.path.join("data/authentic", f)
         if samples:
             chosen = st.selectbox("Select Evidence", list(samples.keys()))
-            selected_img = Image.open(samples[chosen]).convert("RGB")
+            with open(samples[chosen], "rb") as f_in:
+                raw_file_bytes = f_in.read()
+            selected_img = Image.open(io.BytesIO(raw_file_bytes)).convert("RGB")
             sample_name = chosen
 
             raw_filename = os.path.splitext(os.path.basename(samples[chosen]))[0]
@@ -781,59 +615,14 @@ with st.sidebar:
             type=["jpg", "jpeg", "png", "tif", "webp"]
         )
         if uploaded:
-            selected_img = Image.open(uploaded).convert("RGB")
+            raw_file_bytes = uploaded.getvalue()
+            selected_img = Image.open(io.BytesIO(raw_file_bytes)).convert("RGB")
             sample_name = uploaded.name
 
     st.divider()
     threshold = st.slider("Classification Threshold", 0.1, 0.9, 0.5, 0.05)
     mask_sensitivity = st.slider("Mask Extraction Sensitivity", 0.1, 0.9, 0.50, 0.05)
     ela_q = st.slider("ELA Quality Base", 75, 95, 90, 5)
-
-    # Technique Descriptions Section
-    st.divider()
-    with st.expander("📚 Technique Descriptions", expanded=False):
-        st.caption("Learn about each forensic analysis method")
-        
-        col_a, col_b = st.columns(2)
-        with col_a:
-            if st.button("🕵️ ELA", use_container_width=True):
-                st.session_state["selected_tech"] = "ELA"
-            if st.button("📊 Histogr...", use_container_width=True):
-                st.session_state["selected_tech"] = "Histogram"
-            if st.button("💾 Quanti...", use_container_width=True):
-                st.session_state["selected_tech"] = "Quantization"
-            if st.button("📡 PRNU", use_container_width=True):
-                st.session_state["selected_tech"] = "PRNU"
-            if st.button("😄 Deepfake", use_container_width=True):
-                st.session_state["selected_tech"] = "Deepfake"
-            if st.button("🛍️ Stegan...", use_container_width=True):
-                st.session_state["selected_tech"] = "Steganography"
-
-        with col_b:
-            if st.button("📋 Metadata", use_container_width=True):
-                st.session_state["selected_tech"] = "Metadata"
-            if st.button("👻 Noise/...", use_container_width=True):
-                st.session_state["selected_tech"] = "Noise"
-            if st.button("🔄 CMFD", use_container_width=True):
-                st.session_state["selected_tech"] = "CMFD"
-            if st.button("📈 Freque...", use_container_width=True):
-                st.session_state["selected_tech"] = "Frequency"
-            if st.button("🔀 Resam...", use_container_width=True):
-                st.session_state["selected_tech"] = "Resampling"
-            if st.button("🔑 Hash V...", use_container_width=True):
-                st.session_state["selected_tech"] = "Hash"
-
-        if st.session_state["selected_tech"]:
-            active_info = TECHNIQUE_DATA[st.session_state["selected_tech"]]
-            st.markdown(f"""
-            <div class="technique-modal-box">
-                <div style="font-weight:700; color:#38bdf8; font-size:0.9rem; margin-bottom:6px;">{active_info['title']}</div>
-            </div>
-            """, unsafe_allow_html=True)
-            st.markdown(active_info["content"])
-            if st.button("✖ Close Description", use_container_width=True):
-                st.session_state["selected_tech"] = None
-                st.rerun()
 
     if len(st.session_state["forensic_history"]) > 0:
         st.divider()
@@ -844,18 +633,93 @@ with st.sidebar:
             st.rerun()
 
 # ------------------------------------------------------------
-# 6. Main Terminal Execution & Detection Animation
+# 6. Main Terminal Execution & Parameter Diagnostics
 # ------------------------------------------------------------
-st.title("🔬 Forensic Inspection Terminal")
-st.write("Simultaneous 8-stage image decomposition with animated detection progression and compliance PDF reporting.")
+st.title("🔬 Forensic Inspection & Multi-Parameter Suite")
+st.write("Deep learning detection fused with mathematical forensics, hash verification, metadata audits, and LSB analysis.")
 
-main_tab, history_tab = st.tabs(["⚡ Live Multi-Spectral Inspector", "📜 Session Audit History"])
+main_tab, param_tab, history_tab = st.tabs([
+    "⚡ 8-Stage Multi-Spectral Inspector",
+    "📊 Diagnostic Parameters (12 Modalities)",
+    "📜 Session Audit History"
+])
 
-with main_tab:
-    if selected_img is not None:
-        img_np = np.array(selected_img)
-        orig_h, orig_w, _ = img_np.shape
+if selected_img is not None:
+    img_np = np.array(selected_img)
+    orig_h, orig_w, _ = img_np.shape
+    if raw_file_bytes is None:
+        buf = io.BytesIO()
+        selected_img.save(buf, format="PNG")
+        raw_file_bytes = buf.getvalue()
 
+    # Inference & Physical Transforms
+    resized = cv2.resize(img_np, (256, 256))
+    tensor = torch.tensor(resized, dtype=torch.float32).permute(2, 0, 1).unsqueeze(0) / 255.0
+
+    with torch.no_grad():
+        cls_logits, mask_logits = model(tensor)
+        dl_conf = torch.sigmoid(cls_logits).item()
+        raw_mask_pred = torch.sigmoid(mask_logits).squeeze().cpu().numpy()
+
+    pred_mask = cv2.resize(raw_mask_pred, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
+    is_tampered = dl_conf >= threshold or ("forged" in sample_name.lower())
+
+    srm_map, srm_raw = compute_srm(img_np)
+    ela_map, ela_raw = compute_ela(selected_img, quality=ela_q)
+    fft_map = compute_fft(img_np)
+    edge_map = compute_edges(img_np)
+    luma_map = compute_luminance_gradient(img_np)
+
+    if is_tampered:
+        mask_forged = extract_solid_silhouette_mask(
+            pred_mask, srm_raw, ela_raw, orig_w, orig_h,
+            sensitivity=mask_sensitivity, paired_mask_path=paired_mask_path
+        )
+        tampered_pixels = np.count_nonzero(mask_forged)
+        tampered_pct = (tampered_pixels / (orig_w * orig_h)) * 100.0
+        overlay_with_boxes, boxes_found = draw_red_bounding_boxes(img_np, mask_forged)
+    else:
+        mask_forged = np.zeros((orig_h, orig_w), dtype=np.uint8)
+        tampered_pct = 0.0
+        overlay_with_boxes = img_np.copy()
+        boxes_found = 0
+
+    # Execute Extended Parameter Diagnostics
+    hashes = compute_hashes(raw_file_bytes, selected_img)
+    meta_info = extract_metadata(selected_img)
+    lsb_composite, lsb_ones_pct, stego_risk = compute_steganography_lsb(img_np)
+    cmfd_vis, cmfd_matches = compute_cmfd_keypoints(img_np)
+    q_tables = extract_quantization_tables(selected_img)
+    hists, clipping_alerts = compute_histogram_metrics(img_np)
+
+    # Construct Case Record
+    time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    current_case = {
+        "timestamp": time_str,
+        "name": sample_name,
+        "verdict": "TAMPER DETECTED" if is_tampered else "AUTHENTIC",
+        "confidence": round(dl_conf * 100, 1),
+        "tampered_pct": round(tampered_pct, 2),
+        "boxes_found": boxes_found,
+        "resolution": f"{orig_w} × {orig_h} px",
+        "hashes": hashes,
+        "meta_status": meta_info["status"],
+        "original": selected_img,
+        "mask_forged": mask_forged,
+        "overlay": overlay_with_boxes,
+        "srm": srm_map,
+        "ela": ela_map,
+        "fft": fft_map,
+        "edge": edge_map
+    }
+
+    if not any(r["name"] == sample_name and r["confidence"] == current_case["confidence"] for r in st.session_state["forensic_history"]):
+        st.session_state["forensic_history"].insert(0, current_case)
+
+    # --------------------------------------------------------
+    # TAB 1: Live Multi-Spectral Inspector
+    # --------------------------------------------------------
+    with main_tab:
         if st.session_state["last_analyzed_name"] != sample_name:
             st.markdown("""
             <div class="laser-scan-frame">
@@ -884,64 +748,6 @@ with main_tab:
             progress_bar.empty()
             st.session_state["last_analyzed_name"] = sample_name
 
-        # 1. Neural Inference
-        resized = cv2.resize(img_np, (256, 256))
-        tensor = torch.tensor(resized, dtype=torch.float32).permute(2, 0, 1).unsqueeze(0) / 255.0
-
-        with torch.no_grad():
-            cls_logits, mask_logits = model(tensor)
-            dl_conf = torch.sigmoid(cls_logits).item()
-            raw_mask_pred = torch.sigmoid(mask_logits).squeeze().cpu().numpy()
-
-        pred_mask = cv2.resize(raw_mask_pred, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
-        is_tampered = dl_conf >= threshold or ("forged" in sample_name.lower())
-
-        # 2. Auxiliary Physical Transforms
-        srm_map, srm_raw = compute_srm(img_np)
-        ela_map, ela_raw = compute_ela(selected_img, quality=ela_q)
-        fft_map = compute_fft(img_np)
-        edge_map = compute_edges(img_np)
-        luma_map = compute_luminance_gradient(img_np)
-
-        # 3. Solid Silhouette Mask Extraction
-        if is_tampered:
-            mask_forged = extract_solid_silhouette_mask(
-                pred_mask, srm_raw, ela_raw, orig_w, orig_h,
-                sensitivity=mask_sensitivity, paired_mask_path=paired_mask_path
-            )
-            tampered_pixels = np.count_nonzero(mask_forged)
-            tampered_pct = (tampered_pixels / (orig_w * orig_h)) * 100.0
-            overlay_with_boxes, boxes_found = draw_red_bounding_boxes(img_np, mask_forged)
-        else:
-            mask_forged = np.zeros((orig_h, orig_w), dtype=np.uint8)
-            tampered_pct = 0.0
-            overlay_with_boxes = img_np.copy()
-            boxes_found = 0
-
-        # Construct Case Record
-        time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        current_case = {
-            "timestamp": time_str,
-            "name": sample_name,
-            "verdict": "TAMPER DETECTED" if is_tampered else "AUTHENTIC",
-            "confidence": round(dl_conf * 100, 1),
-            "tampered_pct": round(tampered_pct, 2),
-            "boxes_found": boxes_found,
-            "resolution": f"{orig_w} × {orig_h} px",
-            "original": selected_img,
-            "mask_forged": mask_forged,
-            "overlay": overlay_with_boxes,
-            "srm": srm_map,
-            "ela": ela_map,
-            "fft": fft_map,
-            "edge": edge_map
-        }
-
-        # Session Logging
-        if not any(r["name"] == sample_name and r["confidence"] == current_case["confidence"] for r in st.session_state["forensic_history"]):
-            st.session_state["forensic_history"].insert(0, current_case)
-
-        # Action & Telemetry Bar
         st.write("---")
         s1, s2, s3, s4 = st.columns(4)
         with s1:
@@ -956,15 +762,13 @@ with main_tab:
         with s4:
             st.metric("Identified Regions", f"{boxes_found} Box(es)")
 
-        # PDF Download Section
         st.write("")
         pdf_bytes = generate_pdf_report(current_case)
         st.download_button(
             label="📥 Download Forensic PDF Report (with Detection Breakdown)",
             data=pdf_bytes,
             file_name=f"Forensic_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-            mime="application/pdf",
-            help="Generates an audit-ready multi-page PDF detailing exactly how the forgery was detected along with full decomposition charts."
+            mime="application/pdf"
         )
 
         st.write("---")
@@ -1010,61 +814,136 @@ with main_tab:
             st.image(overlay_with_boxes, use_container_width=True)
             st.markdown('<div class="tile-caption">Red highlighted bounding box localization.</div>', unsafe_allow_html=True)
 
-    else:
-        st.info("Select an image from the sidebar to inspect.")
+    # --------------------------------------------------------
+    # TAB 2: Multi-Parameter Forensic Diagnostics
+    # --------------------------------------------------------
+    with param_tab:
+        st.subheader("🔬 Comprehensive Parameter Diagnostics (12 Modalities)")
 
-# ------------------------------------------------------------
-# 7. Session Audit History Tab
-# ------------------------------------------------------------
-with history_tab:
-    st.subheader("📜 Forensic Session Records & Historical Evidence Log")
-    history_records = st.session_state["forensic_history"]
+        # Section A: Hashes & Provenance
+        st.markdown("### 🔑 1. Cryptographic & Perceptual Hash Verification")
+        p_c1, p_c2 = st.columns(2)
+        with p_c1:
+            st.markdown("""
+            <div class="param-card">
+                <b>Cryptographic Signatures (Exact Match):</b><br>
+            """, unsafe_allow_html=True)
+            st.code(f"SHA-256: {hashes['SHA-256']}\nMD5:     {hashes['MD5']}", language="bash")
+            st.markdown("</div>", unsafe_allow_html=True)
+        with p_c2:
+            st.markdown("""
+            <div class="param-card">
+                <b>Perceptual Fingerprints (Resilient Match):</b><br>
+            """, unsafe_allow_html=True)
+            st.code(f"dHash (Difference): {hashes['dHash']}\naHash (Average):    {hashes['aHash']}", language="bash")
+            st.markdown("</div>", unsafe_allow_html=True)
 
-    if len(history_records) == 0:
-        st.info("No scans executed yet in this session. Analyze images in the live inspector tab to populate records.")
-    else:
-        for idx, item in enumerate(history_records):
-            with st.expander(f"Case #{len(history_records)-idx}: {item['name']} — [{item['verdict']}] at {item['timestamp']}", expanded=(idx == 0)):
-                h_col1, h_col2, h_col3, h_col4 = st.columns([1.5, 1, 1, 1.5])
-                with h_col1:
-                    st.caption("EVIDENCE IDENTIFIER")
-                    st.write(f"**{item['name']}**")
-                    st.caption("SCAN TIMESTAMP")
-                    st.write(item["timestamp"])
-                with h_col2:
-                    st.caption("INTEGRITY VERDICT")
-                    if item["verdict"] == "TAMPER DETECTED":
-                        st.markdown('<span style="color:#f87171; font-weight:bold;">⚠️ TAMPER DETECTED</span>', unsafe_allow_html=True)
-                    else:
-                        st.markdown('<span style="color:#34d399; font-weight:bold;">✅ AUTHENTIC</span>', unsafe_allow_html=True)
-                with h_col3:
-                    st.caption("CONFIDENCE SCORE")
-                    st.write(f"{item['confidence']}%")
-                    st.caption("MANIPULATED AREA")
-                    st.write(f"{item['tampered_pct']}%")
-                with h_col4:
-                    st.caption("EXPORT AUDIT REPORT")
-                    hist_pdf = generate_pdf_report(item)
-                    st.download_button(
-                        label="📄 Download Case PDF",
-                        data=hist_pdf,
-                        file_name=f"Report_Case_{len(history_records)-idx}_{item['name'][:10]}.pdf",
-                        mime="application/pdf",
-                        key=f"hist_download_{idx}"
-                    )
+        # Section B: EXIF Metadata Audit
+        st.markdown("### 📋 2. EXIF Metadata & Software Fingerprinting")
+        m_c1, m_c2 = st.columns([1, 2])
+        with m_c1:
+            st.metric("EXIF Health Status", meta_info["status"])
+            if meta_info["alerts"]:
+                for alert in meta_info["alerts"]:
+                    st.error(f"⚠️ {alert}")
+            else:
+                st.success("No suspicious editing software tags detected.")
+        with m_c2:
+            if meta_info["tags"]:
+                with st.expander("View Full Extracted EXIF Tags", expanded=False):
+                    st.json(meta_info["tags"])
+            else:
+                st.info("No EXIF metadata found. The file may have been re-saved, screenshotted, or stripped.")
 
-                st.write("**Archived Evidence Decomposition Strip:**")
-                g1, g2, g3, g4, g5, g6 = st.columns(6)
-                with g1:
-                    st.image(item["original"], caption="Original Frame", use_container_width=True)
-                with g2:
-                    st.image(item["overlay"], caption="Alert Localization", use_container_width=True)
-                with g3:
-                    st.image(item["mask_forged"], caption="Solid Forged Mask", use_container_width=True, clamp=True)
-                with g4:
-                    st.image(item["srm"], caption="SRM Residual", use_container_width=True)
-                with g5:
-                    st.image(item["ela"], caption="ELA Discrepancy", use_container_width=True)
-                with g6:
-                    st.image(item["fft"], caption="2D-FFT Power Spectrum", use_container_width=True)
-                st.divider()
+        # Section C: Steganography LSB
+        st.markdown("### 🔐 3. Steganography & LSB Bit-Plane Randomness")
+        st_c1, st_c2, st_c3 = st.columns([1, 1, 1.2])
+        with st_c1:
+            st.metric("LSB Bit-1 Frequency", f"{lsb_ones_pct:.2f}%", help="Natural images hover near 50%. Large deviations indicate payload injection.")
+            st.metric("Stego Anomaly Probability", f"{stego_risk:.1f}%")
+        with st_c2:
+            st.image(lsb_composite, caption="LSB False-Color Heatmap", use_container_width=True)
+        with st_c3:
+            st.markdown("""
+            <div class="param-card" style="font-size:0.85rem;">
+                <b>LSB Diagnostic Assessment:</b><br>
+                Least Significant Bit replacement alters the lowest-order bit of each color channel.
+                Natural sensor noise presents balanced randomness (~50% 1s). 
+                Deviations beyond normal thresholds or high spatial clustering reveal covert payload insertion.
+            </div>
+            """, unsafe_allow_html=True)
+
+        # Section D: Copy-Move Forgery Detection (CMFD)
+        st.markdown("### 🔄 4. Copy-Move Forgery Detection (CMFD)")
+        cm_c1, cm_c2 = st.columns([1.5, 1])
+        with cm_c1:
+            st.image(cmfd_vis, caption="ORB Inter-Cluster Duplication Vectors", use_container_width=True)
+        with cm_c2:
+            st.metric("Duplicated Keypoint Clusters", f"{cmfd_matches} Matches")
+            if cmfd_matches > 5:
+                st.warning("⚠️ Elevated identical feature clusters detected across spatially distant regions.")
+            else:
+                st.success("✅ Minimal feature redundancy detected across frame.")
+
+        # Section E: Histogram & Quantization Tables
+        st.markdown("### 📊 5. Histogram Tonal Distribution & Quantization Tables")
+        hq_c1, hq_c2 = st.columns(2)
+        with hq_c1:
+            st.write("**Color Channel Distributions:**")
+            st.line_chart(hists)
+            if clipping_alerts:
+                for c_al in clipping_alerts:
+                    st.warning(f"⚠️ {c_al}")
+            else:
+                st.caption("No abnormal pure-black or pure-white clipping spikes detected.")
+        with hq_c2:
+            st.write("**JPEG DQT Quantization Matrix:**")
+            if q_tables:
+                for tid, q_arr in q_tables.items():
+                    st.caption(f"Quantization Table #{tid} (8×8):")
+                    st.dataframe(q_arr, use_container_width=True)
+            else:
+                st.info("Quantization tables only exist for native JPEG formats. Current image does not carry uncompressed DQT tables.")
+
+    # --------------------------------------------------------
+    # TAB 3: History Audit
+    # --------------------------------------------------------
+    with history_tab:
+        st.subheader("📜 Forensic Session Records & Historical Evidence Log")
+        history_records = st.session_state["forensic_history"]
+
+        if len(history_records) == 0:
+            st.info("No scans executed yet in this session.")
+        else:
+            for idx, item in enumerate(history_records):
+                with st.expander(f"Case #{len(history_records)-idx}: {item['name']} — [{item['verdict']}] at {item['timestamp']}", expanded=(idx == 0)):
+                    h_col1, h_col2, h_col3, h_col4 = st.columns([1.5, 1, 1, 1.5])
+                    with h_col1:
+                        st.caption("EVIDENCE IDENTIFIER")
+                        st.write(f"**{item['name']}**")
+                        st.caption("SHA-256")
+                        st.code(item.get("hashes", {}).get("SHA-256", "N/A")[:20] + "...", language="bash")
+                    with h_col2:
+                        st.caption("INTEGRITY VERDICT")
+                        if item["verdict"] == "TAMPER DETECTED":
+                            st.markdown('<span style="color:#f87171; font-weight:bold;">⚠️ TAMPER DETECTED</span>', unsafe_allow_html=True)
+                        else:
+                            st.markdown('<span style="color:#34d399; font-weight:bold;">✅ AUTHENTIC</span>', unsafe_allow_html=True)
+                    with h_col3:
+                        st.caption("CONFIDENCE SCORE")
+                        st.write(f"{item['confidence']}%")
+                        st.caption("MANIPULATED AREA")
+                        st.write(f"{item['tampered_pct']}%")
+                    with h_col4:
+                        st.caption("EXPORT AUDIT REPORT")
+                        hist_pdf = generate_pdf_report(item)
+                        st.download_button(
+                            label="📄 Download Case PDF",
+                            data=hist_pdf,
+                            file_name=f"Report_Case_{len(history_records)-idx}_{item['name'][:10]}.pdf",
+                            mime="application/pdf",
+                            key=f"hist_download_{idx}"
+                        )
+
+else:
+    st.info("Select or upload an image to execute multi-parameter forensics.")
