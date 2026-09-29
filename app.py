@@ -23,7 +23,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Dark Forensics & Report Styling with Multi-Stage Scanning HUD Animations
+# Dark Forensics & Report Styling
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
@@ -92,7 +92,7 @@ st.markdown("""
         letter-spacing: 1px;
     }
 
-    /* Animated Sidebar Cards */
+    /* Sidebar Components */
     .sidebar-header-card {
         background: linear-gradient(135deg, rgba(15, 23, 42, 0.85) 0%, rgba(30, 41, 59, 0.6) 100%);
         border: 1px solid rgba(56, 189, 248, 0.3);
@@ -177,6 +177,16 @@ st.markdown("""
         border-radius: 8px;
         font-weight: 800;
         text-align: center;
+    }
+
+    /* Technique Description Box */
+    .technique-modal-box {
+        background: rgba(15, 23, 42, 0.95);
+        border: 1px solid #38bdf8;
+        border-radius: 10px;
+        padding: 14px;
+        margin-top: 12px;
+        box-shadow: 0 4px 20px rgba(56, 189, 248, 0.2);
     }
 </style>
 """, unsafe_allow_html=True)
@@ -349,7 +359,6 @@ def generate_pdf_report(case_dict):
     story.append(summary_table)
     story.append(Spacer(1, 16))
 
-    # Append Inspection Steps Breakdown to Report
     story.append(Paragraph("<b>Sequential Detection Verification Breakdown</b>", styles["Heading3"]))
     steps_data = [
         ["Detection Phase", "Forensic Modality", "Mechanism & Diagnostic Significance"],
@@ -409,6 +418,8 @@ if "forensic_history" not in st.session_state:
     st.session_state["forensic_history"] = []
 if "last_analyzed_name" not in st.session_state:
     st.session_state["last_analyzed_name"] = None
+if "selected_tech" not in st.session_state:
+    st.session_state["selected_tech"] = None
 
 @st.cache_resource
 def load_detector():
@@ -422,7 +433,297 @@ def load_detector():
 model = load_detector()
 
 # ------------------------------------------------------------
-# 4. Animated Sidebar Controls
+# 4. Comprehensive Technique Knowledge Base
+# ------------------------------------------------------------
+TECHNIQUE_DATA = {
+    "ELA": {
+        "title": "🕵️ Error Level Analysis (ELA)",
+        "content": """
+**What is ELA?**
+Error Level Analysis is like a detective looking for touch-ups in a photograph. When you edit a digital image and save it as JPEG, the edited areas compress differently than the original areas. ELA highlights these compression differences to reveal potential manipulations.
+Think of it like this: Imagine a painting where some areas have been repainted. The new paint (edited regions) will look slightly different from the old paint (original regions) under special lighting. ELA is that "special lighting" for digital images.
+
+**What Does ELA Measure?**
+* Compression inconsistencies across the image
+* Difference in error levels between original and edited regions
+* Block-level anomalies in 8×8 JPEG compression blocks
+* Noise patterns that deviate from camera sensor characteristics
+
+**How to Interpret Results:**
+* **✅ Normal Patterns (Likely Authentic):** Uniform brightness across the entire ELA image, consistent error levels in similar texture regions, natural noise distribution matching camera characteristics, low overall error scores (typically < 20).
+* **⚠️ Suspicious Patterns (Possible Manipulation):** Bright spots or regions standing out dramatically, sharp boundaries between high and low error areas, inconsistent compression in regions that should be similar, geometric shapes with different error levels than surroundings, high error scores (> 30) in specific regions.
+
+**Common Artifacts Detected:**
+* **Copy-Paste Forgeries:** Pasted regions show different compression levels; bright outlines appear around inserted objects.
+* **Content Addition/Removal:** Edited areas glow brighter than untouched regions ("halo effects").
+* **Splicing Attacks:** Images combined from multiple sources show distinct error level boundaries.
+* **Enhancement Filters:** Sharpening, blurring, or color adjustments create elevated error patterns.
+* **Cloning/Stamp Tool:** Cloned regions show different error levels than source with repeating variations.
+
+**Visual Analogy:**
+Imagine you have a document that's been photocopied multiple times:
+* Original text (never edited) = uniform, consistent quality
+* Whited-out and retyped sections = obvious differences in ink darkness
+* Cut-and-paste sections = visible boundaries and quality mismatches
+
+**Limitations & Best Practices:**
+* Text overlays and high-contrast edges often glow bright naturally.
+* Highly textured areas (grass, fabric) show naturally elevated error levels.
+* Always compare ELA with metadata, noise analysis, and copy-move detection.
+"""
+    },
+    "Metadata": {
+        "title": "📋 Metadata Analysis",
+        "content": """
+**What is Metadata?**
+Metadata is the "birth certificate" of a digital image – hidden information embedded in the file that tells the story of how, when, and where the photo was created. This data is automatically recorded by cameras and editing software but can reveal tampering.
+Think of metadata like invisible ink on the back of a photograph recording camera settings, timestamps, GPS coordinates, and software tags.
+
+**What Does Metadata Measure?**
+* **EXIF Data:** Camera settings (ISO, aperture, shutter speed, focal length).
+* **Device Information:** Camera make, model, serial number.
+* **Timestamps:** Creation date, modification date, digitization date.
+* **GPS Coordinates:** Location where photo was taken.
+* **Software Tags:** Editing tools that processed the image (Photoshop, GIMP, Canva).
+* **Thumbnail Data:** Embedded preview image comparisons.
+
+**How to Interpret Results:**
+* **✅ Normal Patterns:** Consistent timestamps (creation = modification time), full camera manufacturer data present, valid GPS, and thumbnail matching the main frame.
+* **⚠️ Suspicious Patterns:** Completely stripped metadata, software signatures from photo editors, timestamp anomalies (modified before created), impossible camera parameters (ISO 0), or visual mismatch between thumbnail and main frame.
+
+**Limitations & Best Practices:**
+* Metadata can be faked or manually altered by sophisticated tools.
+* Social media platforms routinely strip metadata for user privacy.
+* Screenshots and messaging apps naturally lack original camera EXIF data.
+* Cross-reference metadata with visual scene lighting, shadows, and weather.
+"""
+    },
+    "Histogram": {
+        "title": "📊 Histogram Analysis",
+        "content": """
+**What is Histogram Analysis?**
+A histogram is like a "census of pixels" – it counts how many pixels in an image have each brightness or color level. By analyzing these distributions, we can detect unnatural patterns created by image manipulation.
+Natural photos have smooth, bell-curve-like distributions, while edited photos introduce gaps, spikes, or unnatural cutoffs.
+
+**What Does Histogram Analysis Measure?**
+* Pixel distribution across brightness levels (0–255).
+* Color channel balance (Red, Green, Blue separately).
+* Histogram gaps (missing brightness values) and spikes.
+* Comb patterns (regular gaps suggesting heavy editing/posterization).
+* Clipping at extremes (pure black 0 or pure white 255).
+
+**How to Interpret Results:**
+* **✅ Normal Patterns:** Smooth, continuous curves across the spectrum; balanced RGB channels.
+* **⚠️ Suspicious Patterns:**
+  * **Comb Pattern:** Regular vertical gaps indicating aggressive levels/curves adjustment or repeated re-saving.
+  * **Spikes at Specific Values:** Tall, narrow peaks from contrast stretching or cloning.
+  * **Clipping:** Histogram slamming into 0 or 255, losing detail.
+  * **Bimodal Distributions:** Two distinct peaks suggesting splicing from different sources.
+
+**Limitations & Best Practices:**
+* High-contrast scenes (sunsets, spotlights) naturally produce unusual distributions.
+* Check all three color channels (R, G, B) rather than brightness alone.
+"""
+    },
+    "Noise": {
+        "title": "👻 Noise Analysis & JPEG Ghost Detection",
+        "content": """
+**What is Noise Analysis?**
+Digital noise is the "fingerprint" of a camera sensor – every sensor produces a unique pattern of random pixel variations. When content is added from different sources, the noise patterns will not match, revealing the forgery.
+JPEG Ghost Detection looks for faint outlines that appear when an image is saved across multiple compression qualities.
+
+**What Does It Measure?**
+* Sensor noise consistency and local noise variance across different regions.
+* Quality mismatches between foreground and background.
+* Ghost boundaries where new elements were inserted.
+* Double-compression signatures.
+
+**How to Interpret Results:**
+* **✅ Normal Patterns:** Uniform noise distribution, consistent noise in similar lighting, higher noise in shadows and lower in highlights, minimal ghosting.
+* **⚠️ Suspicious Patterns:** Regions that are unnaturally smooth (denoised or AI-generated), dark areas with less noise than bright areas, and visible ghost outlines appearing at specific JPEG quality re-compressions.
+
+**Common Artifacts Detected:**
+* Splicing and composite images with mismatched grain.
+* Content-aware fill creating unnaturally smooth, noise-free patches.
+* AI-generated content displaying mathematically uniform noise signatures.
+"""
+    },
+    "Quantization": {
+        "title": "💾 Quantization Table Analysis",
+        "content": """
+**What is a Quantization Table?**
+The quantization table is the "recipe" JPEG uses to compress images. It is an 8×8 grid of numbers that tells the compression algorithm how much to simplify different frequencies. Every camera brand and software editor uses unique recipes.
+
+**What Does It Measure?**
+* 8×8 quantization matrix coefficients.
+* JPEG quality level estimation (0–100).
+* Single vs. double compression history.
+* Software signatures matching known camera or software profiles.
+
+**How to Interpret Results:**
+* **✅ Normal Patterns:** Clean quantization table matching camera manufacturer, single compression signature, and quality level appropriate for the capture device.
+* **⚠️ Suspicious Patterns:**
+  * **Double Compression:** Evidence of two overlapping quantization tables (e.g., Canon EOS Q=95 re-saved in Photoshop at Q=85).
+  * **Software Mismatch:** Table points to Photoshop/GIMP despite claims of an unedited camera capture.
+  * **Inconsistent Tables:** Different parts of the image show differing quantization tables, indicating splicing.
+
+**Practical Tips:**
+* Lower table numbers = less compression (higher quality).
+* Double compression is one of the strongest technical indicators of post-processing.
+"""
+    },
+    "CMFD": {
+        "title": "🔄 Copy-Move Forgery Detection (CMFD)",
+        "content": """
+**What is Copy-Move Forgery Detection?**
+Copy-move forgery occurs when one part of an image is copied and pasted elsewhere within the same frame to hide, duplicate, or alter content. CMFD compares 8×8 blocks and keypoint descriptors (SIFT/ORB) to find suspiciously identical regions.
+
+**What Does CMFD Measure?**
+* Block similarities across 8×8 pixel grids.
+* Feature matching and spatial relationships between matching regions.
+* Rotated, scaled, or skewed duplicate copies.
+* DCT coefficient matching for JPEG images.
+
+**How to Interpret Results:**
+* **✅ Normal Patterns:** No matching block clusters; natural, random variations in repetitive textures (leaves, tiles, brickwork).
+* **⚠️ Suspicious Patterns:** Exact duplicate block matches, large geometric clusters of matching features, and sharp boundary discontinuities around cloned objects.
+
+**Limitations & Best Practices:**
+* Natural scene repetitions (brick patterns, repeating waves) can trigger false positives.
+* Look for unnatural clustering and edge blurring around the pasted elements.
+"""
+    },
+    "PRNU": {
+        "title": "📡 PRNU Analysis (Photo Response Non-Uniformity)",
+        "content": """
+**What is PRNU Analysis?**
+PRNU is the physical fingerprint of a camera sensor. Microscopic manufacturing defects in silicon create a unique, invisible pattern in every photo taken by that sensor. It is the digital equivalent of ballistic striations on a bullet.
+
+**What Does PRNU Measure?**
+* Physical sensor manufacturing imperfections.
+* Pixel-level light sensitivity variations.
+* Hardware-specific noise patterns extracted via high-pass filtering (e.g., 5×5 SRM filters).
+* Device matching against reference image databases.
+
+**How to Interpret Results:**
+* **✅ Normal Patterns:** Strong correlation score (> 0.010) matching a single camera sensor across the entire frame.
+* **⚠️ Suspicious Patterns:** Multiple distinct PRNU patterns in different regions (composite images from different cameras), low overall correlation (< 0.005), or pasted content lacking sensor fingerprinting.
+
+**Practical Considerations:**
+* RAW images and high-resolution camera originals preserve PRNU best.
+* Social media compression and aggressive downscaling severely degrade sensor fingerprint signals.
+"""
+    },
+    "Frequency": {
+        "title": "📈 Frequency Domain Analysis (FFT & DCT)",
+        "content": """
+**What is Frequency Domain Analysis?**
+Frequency analysis examines images in frequency space rather than pixel space:
+* **FFT (Fast Fourier Transform):** Breaks down an image into frequency components, measuring the balance between smooth areas and sharp detail.
+* **DCT (Discrete Cosine Transform):** Analyzes 8×8 JPEG compression blocks and coefficient distributions.
+
+**What Does It Measure?**
+* High-frequency content (edges, fine detail, noise) vs. low-frequency content (smooth gradients).
+* Spectral uniformity and periodic spikes caused by artificial resampling.
+* Block-level quantization consistency.
+
+**How to Interpret Results:**
+* **✅ Normal Patterns:** Natural balance of high and low frequencies; smooth energy distribution without isolated spikes; authenticity score > 75.
+* **⚠️ Suspicious Patterns:**
+  * **Excessive High Frequencies:** Starburst or spiky halos indicating artificial over-sharpening.
+  * **Unnatural Smoothness:** Abnormally low high-frequency content characteristic of AI generation.
+  * **Periodic Grid Spikes:** Symmetrical frequency spikes indicating interpolation, upscaling, or GAN generation lattices.
+"""
+    },
+    "Deepfake": {
+        "title": "😄 Deepfake & Face Forensics",
+        "content": """
+**What is Deepfake Detection?**
+Deepfake detection analyzes facial landmarks, corneal reflections, texture coherence, and biological consistency to identify AI-generated or manipulated faces.
+
+**What Does It Measure?**
+* Facial feature symmetry and biological feasibility.
+* Eye reflection consistency (corneal highlight alignment).
+* Skin micro-texture (presence of pores vs. plastic AI smoothness).
+* Edge blending and boundary artifacts around the jawline and hairline.
+* In video: blink rate, gaze tracking, and temporal flickering.
+
+**How to Interpret Results:**
+* **✅ Normal Patterns:** Natural skin texture with pores and wrinkles, matching light reflections in both pupils, biologically plausible facial proportions.
+* **⚠️ Suspicious Patterns:** Unnaturally smooth, plastic-like skin texture, mismatched pupil reflections, warping around facial contours, and boundary blur along the jawline or hair.
+
+**Best Practices:**
+* Evaluate facial feature proportions against natural anatomical ranges.
+* Combine facial analysis with frequency domain checks to detect generative artifacts.
+"""
+    },
+    "Resampling": {
+        "title": "🔀 Resampling & Interpolation Detection",
+        "content": """
+**What is Resampling Detection?**
+Resampling occurs when an image or patch is scaled up, down, or rotated. Interpolation algorithms (nearest neighbor, bilinear, bicubic) create new pixels in mathematically predictable periodic patterns.
+
+**What Does It Measure?**
+* Periodic pixel interpolation derivatives (via Radon transforms / p-map analysis).
+* Scaling and rotation factors applied to image patches.
+* Directional interpolation artifacts (horizontal vs. vertical stretching).
+
+**How to Interpret Results:**
+* **✅ Normal Patterns:** Absence of periodic derivative artifacts; uniform resolution across all image regions.
+* **⚠️ Suspicious Patterns:**
+  * **Region-Specific Resampling:** Foreground object shows upscaling artifacts while the background is at native resolution.
+  * **Directional Artifacts:** Horizontal or vertical periodic patterns indicating non-uniform stretching.
+  * **Blocky Nearest-Neighbor Artifacts:** Visible stair-stepping on enlarged low-resolution elements.
+
+**Limitations:**
+* Subsequent JPEG compressions and blur filters can partially mask resampling patterns.
+"""
+    },
+    "Steganography": {
+        "title": "🛍️ Steganography Analysis",
+        "content": """
+**What is Steganography?**
+Steganography is the practice of concealing secret data inside ordinary files. Unlike encryption, which scrambles data, steganography hides the very existence of the data by altering the Least Significant Bits (LSB) of pixels.
+
+**What Does It Measure?**
+* LSB plane bit-distribution across RGB channels.
+* Chi-square statistical randomness tests.
+* Block-based entropy deviations.
+
+**How to Interpret Results:**
+* **✅ Normal Patterns:** Natural LSB distributions (~50/50 ratio with expected variance); p-value > 0.05.
+* **⚠️ Suspicious Patterns:** Uneven bit distributions, localized high-entropy regions, sharp chi-square p-value drops (< 0.05), or one color channel behaving drastically differently from the others.
+
+**Key Caveats:**
+* Heavy JPEG compression destroys LSB payloads.
+* This tool assesses statistical likelihood of hidden payloads; extracting the underlying message requires the corresponding cryptographic key and extraction algorithm.
+"""
+    },
+    "Hash": {
+        "title": "🔑 Cryptographic & Perceptual Hash Verification",
+        "content": """
+**What is Hash Verification?**
+Hash verification creates unique digital signatures to evaluate file integrity:
+* **Cryptographic Hash (SHA-256):** Produces a 64-character hexadecimal digest. Modifying even a single pixel completely alters the output.
+* **Perceptual Hash (pHash, dHash, aHash):** Generates structural fingerprints resilient to minor resizing or compression.
+
+**What Does It Measure?**
+* **SHA-256:** Byte-for-byte exact file integrity.
+* **Hamming Distance:** Bit difference between perceptual hashes:
+  * 0–5 bits: Nearly identical image (minor compression/resize).
+  * 6–10 bits: Moderate edits or slight cropping.
+  * 11–15 bits: Significant structural alteration.
+  * 16+ bits: Substantially different image.
+
+**Best Practices:**
+* Use SHA-256 for legal chain of custody and bitstream verification.
+* Use perceptual hashes to match resized, format-converted, or slightly compressed variants of registered evidence.
+"""
+    }
+}
+
+# ------------------------------------------------------------
+# 5. Animated Sidebar Controls
 # ------------------------------------------------------------
 with st.sidebar:
     st.markdown("""
@@ -488,6 +789,52 @@ with st.sidebar:
     mask_sensitivity = st.slider("Mask Extraction Sensitivity", 0.1, 0.9, 0.50, 0.05)
     ela_q = st.slider("ELA Quality Base", 75, 95, 90, 5)
 
+    # Technique Descriptions Section
+    st.divider()
+    with st.expander("📚 Technique Descriptions", expanded=False):
+        st.caption("Learn about each forensic analysis method")
+        
+        col_a, col_b = st.columns(2)
+        with col_a:
+            if st.button("🕵️ ELA", use_container_width=True):
+                st.session_state["selected_tech"] = "ELA"
+            if st.button("📊 Histogr...", use_container_width=True):
+                st.session_state["selected_tech"] = "Histogram"
+            if st.button("💾 Quanti...", use_container_width=True):
+                st.session_state["selected_tech"] = "Quantization"
+            if st.button("📡 PRNU", use_container_width=True):
+                st.session_state["selected_tech"] = "PRNU"
+            if st.button("😄 Deepfake", use_container_width=True):
+                st.session_state["selected_tech"] = "Deepfake"
+            if st.button("🛍️ Stegan...", use_container_width=True):
+                st.session_state["selected_tech"] = "Steganography"
+
+        with col_b:
+            if st.button("📋 Metadata", use_container_width=True):
+                st.session_state["selected_tech"] = "Metadata"
+            if st.button("👻 Noise/...", use_container_width=True):
+                st.session_state["selected_tech"] = "Noise"
+            if st.button("🔄 CMFD", use_container_width=True):
+                st.session_state["selected_tech"] = "CMFD"
+            if st.button("📈 Freque...", use_container_width=True):
+                st.session_state["selected_tech"] = "Frequency"
+            if st.button("🔀 Resam...", use_container_width=True):
+                st.session_state["selected_tech"] = "Resampling"
+            if st.button("🔑 Hash V...", use_container_width=True):
+                st.session_state["selected_tech"] = "Hash"
+
+        if st.session_state["selected_tech"]:
+            active_info = TECHNIQUE_DATA[st.session_state["selected_tech"]]
+            st.markdown(f"""
+            <div class="technique-modal-box">
+                <div style="font-weight:700; color:#38bdf8; font-size:0.9rem; margin-bottom:6px;">{active_info['title']}</div>
+            </div>
+            """, unsafe_allow_html=True)
+            st.markdown(active_info["content"])
+            if st.button("✖ Close Description", use_container_width=True):
+                st.session_state["selected_tech"] = None
+                st.rerun()
+
     if len(st.session_state["forensic_history"]) > 0:
         st.divider()
         st.caption(f"{len(st.session_state['forensic_history'])} Logged Session Case(s)")
@@ -497,7 +844,7 @@ with st.sidebar:
             st.rerun()
 
 # ------------------------------------------------------------
-# 5. Main Terminal Execution & Detection Animation
+# 6. Main Terminal Execution & Detection Animation
 # ------------------------------------------------------------
 st.title("🔬 Forensic Inspection Terminal")
 st.write("Simultaneous 8-stage image decomposition with animated detection progression and compliance PDF reporting.")
@@ -509,7 +856,6 @@ with main_tab:
         img_np = np.array(selected_img)
         orig_h, orig_w, _ = img_np.shape
 
-        # Simulated Real-Time Detection Animation on Fresh File Ingestion
         if st.session_state["last_analyzed_name"] != sample_name:
             st.markdown("""
             <div class="laser-scan-frame">
@@ -591,7 +937,7 @@ with main_tab:
             "edge": edge_map
         }
 
-        # Session Logging (prevent duplicates)
+        # Session Logging
         if not any(r["name"] == sample_name and r["confidence"] == current_case["confidence"] for r in st.session_state["forensic_history"]):
             st.session_state["forensic_history"].insert(0, current_case)
 
@@ -610,7 +956,7 @@ with main_tab:
         with s4:
             st.metric("Identified Regions", f"{boxes_found} Box(es)")
 
-        # PDF Download Section with Detection Steps Included
+        # PDF Download Section
         st.write("")
         pdf_bytes = generate_pdf_report(current_case)
         st.download_button(
@@ -668,7 +1014,7 @@ with main_tab:
         st.info("Select an image from the sidebar to inspect.")
 
 # ------------------------------------------------------------
-# 6. Session Audit History Tab
+# 7. Session Audit History Tab
 # ------------------------------------------------------------
 with history_tab:
     st.subheader("📜 Forensic Session Records & Historical Evidence Log")
