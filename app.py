@@ -58,69 +58,65 @@ st.markdown("""
         100% { transform: scale(1); filter: drop-shadow(0 0 2px #38bdf8); }
     }
 
-    /* ALL PARAMETERS ATTRACTIVELY VISIBLE CARDS */
-    .param-showcase-card {
-        background: linear-gradient(135deg, rgba(15, 23, 42, 0.92) 0%, rgba(30, 41, 59, 0.85) 100%);
-        border: 1.5px solid rgba(56, 189, 248, 0.45);
-        border-radius: 12px;
-        padding: 14px 16px;
-        margin-bottom: 12px;
-        box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
-        transition: all 0.3s ease-in-out;
-    }
-    .param-showcase-card:hover {
-        border-color: #38bdf8;
-        box-shadow: 0 0 22px rgba(56, 189, 248, 0.45);
-        transform: translateY(-2px);
-    }
-    .param-badge-title {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 0.98rem;
-        font-weight: 800;
-        color: #38bdf8;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        letter-spacing: 0.5px;
-    }
-    .param-subtitle {
-        font-size: 0.78rem;
-        color: #94a3b8;
-        margin-top: 4px;
-        line-height: 1.4;
+    /* HIGH-CONTRAST & ATTRACTIVE PARAMETER TAB HEADINGS */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 10px !important;
+        background: rgba(15, 23, 42, 0.95) !important;
+        padding: 10px 14px !important;
+        border-radius: 12px !important;
+        border: 1px solid rgba(56, 189, 248, 0.35) !important;
+        overflow-x: auto !important;
+        white-space: nowrap !important;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6) !important;
     }
 
-    /* Streamlit Expander Overrides for Attractive Visibility */
-    div[data-testid="stExpander"] {
-        border: 1.5px solid rgba(56, 189, 248, 0.4) !important;
-        border-radius: 12px !important;
-        background: rgba(15, 23, 42, 0.88) !important;
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45) !important;
-        margin-bottom: 14px !important;
-        overflow: hidden !important;
+    /* Unselected Tab Pills */
+    .stTabs [data-baseweb="tab"] {
+        padding: 9px 16px !important;
+        font-family: 'JetBrains Mono', monospace !important;
+        font-size: 0.86rem !important;
+        font-weight: 700 !important;
+        color: #f1f5f9 !important;
+        border-radius: 8px !important;
+        background: rgba(30, 41, 59, 0.85) !important;
+        border: 1.5px solid rgba(56, 189, 248, 0.35) !important;
         transition: all 0.25s ease-in-out !important;
     }
-    div[data-testid="stExpander"]:hover {
-        border-color: #38bdf8 !important;
-        box-shadow: 0 0 20px rgba(56, 189, 248, 0.4) !important;
-    }
-    div[data-testid="stExpander"] summary {
-        font-family: 'JetBrains Mono', monospace !important;
-        font-size: 0.95rem !important;
-        font-weight: 800 !important;
+
+    /* Force all child labels inside the tabs to be bright and clear */
+    .stTabs [data-baseweb="tab"] p,
+    .stTabs [data-baseweb="tab"] span,
+    .stTabs [data-baseweb="tab"] div {
         color: #f1f5f9 !important;
-        padding: 12px 16px !important;
-        background: linear-gradient(90deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%) !important;
+        font-weight: 700 !important;
     }
-    div[data-testid="stExpander"] summary:hover {
+
+    /* Hover State on Tab Pills */
+    .stTabs [data-baseweb="tab"]:hover {
+        color: #38bdf8 !important;
+        background: rgba(56, 189, 248, 0.22) !important;
+        border-color: #38bdf8 !important;
+        box-shadow: 0 0 16px rgba(56, 189, 248, 0.5) !important;
+        transform: translateY(-2px) !important;
+    }
+    .stTabs [data-baseweb="tab"]:hover p,
+    .stTabs [data-baseweb="tab"]:hover span {
         color: #38bdf8 !important;
     }
-    div[data-testid="stExpander"] summary p,
-    div[data-testid="stExpander"] summary span {
-        font-family: 'JetBrains Mono', monospace !important;
-        font-size: 0.95rem !important;
+
+    /* Selected / Active Tab Pill */
+    .stTabs [aria-selected="true"] {
+        color: #22c55e !important;
+        background: linear-gradient(135deg, rgba(34, 197, 94, 0.25) 0%, rgba(15, 23, 42, 0.95) 100%) !important;
+        border: 2px solid #22c55e !important;
+        box-shadow: 0 0 20px rgba(34, 197, 94, 0.5) !important;
         font-weight: 800 !important;
-        color: #f1f5f9 !important;
+        transform: translateY(-1px) !important;
+    }
+    .stTabs [aria-selected="true"] p,
+    .stTabs [aria-selected="true"] span {
+        color: #22c55e !important;
+        font-weight: 800 !important;
     }
 
     /* HIGH-CONTRAST CLICKABLE BUTTONS */
@@ -139,12 +135,16 @@ st.markdown("""
         box-shadow: 0 0 15px rgba(56, 189, 248, 0.25) !important;
         transition: all 0.25s ease-in-out !important;
     }
-    button p, button span, button *,
+
+    button p,
+    button span,
+    button *,
     div[data-testid="stButton"] > button *,
     div[data-testid="stDownloadButton"] > button * {
         color: #38bdf8 !important;
         font-weight: 700 !important;
     }
+
     button:hover,
     div[data-testid="stButton"] > button:hover,
     div[data-testid="stDownloadButton"] > button:hover {
@@ -154,7 +154,10 @@ st.markdown("""
         box-shadow: 0 0 24px rgba(56, 189, 248, 0.6) !important;
         transform: translateY(-2px) !important;
     }
-    button:hover * {
+
+    button:hover *,
+    div[data-testid="stButton"] > button:hover *,
+    div[data-testid="stDownloadButton"] > button:hover * {
         color: #ffffff !important;
     }
 
@@ -754,9 +757,9 @@ if selected_img is not None:
     pred_mask = cv2.resize(raw_mask_pred, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
     is_tampered = dl_conf >= threshold or ("forged" in sample_name.lower())
 
-    # Precompute transforms
+    # Auxiliary Physical Transforms for Stage 1
     srm_map, srm_raw = compute_srm(img_np)
-    ela_default, ela_default_raw = compute_ela(selected_img, quality=ela_q, scale=20)
+    ela_default, ela_default_raw = compute_ela(selected_img, quality=ela_q)
     fft_map = compute_fft(img_np)
     edge_map = compute_edges(img_np)
     luma_map = compute_luminance_gradient(img_np)
@@ -902,33 +905,51 @@ if selected_img is not None:
             st.markdown('<div class="tile-caption">Red highlighted bounding box localization.</div>', unsafe_allow_html=True)
 
     # --------------------------------------------------------
-    # TAB 2: On-Demand Interactive Diagnostic Parameters (ALL 12 VISIBLE AT A GLANCE)
+    # TAB 2: On-Demand Interactive Diagnostic Parameters
     # --------------------------------------------------------
     with param_tab:
-        st.subheader("🔬 Comprehensive Parametric Suite (12 Modalities)")
-        st.write("All 12 forensic parameters are displayed below with dedicated side-by-side workspaces. Click on any parameter heading to expand its interactive testing panel.")
+        st.subheader("🔬 Comprehensive Parameter Diagnostics (12 Modalities)")
+        st.caption("Select any diagnostic modality from the horizontal tab strip. Adjust selectors on the left and click the action button to compute and display results.")
 
-        # 1. ELA
-        with st.expander("🕵️ 1. Error Level Analysis (ELA) — Compression Inconsistency Mapping", expanded=True):
+        (tab_ela, tab_meta, tab_hist, tab_noise, tab_quant, tab_cmfd, 
+         tab_prnu, tab_freq, tab_deepfake, tab_resam, tab_stego, tab_hash) = st.tabs([
+            "🕵️ ELA",
+            "📋 Metadata",
+            "📊 Histogram",
+            "👻 Noise/Ghost",
+            "💾 Quant Table",
+            "🔄 CMFD",
+            "📡 PRNU",
+            "📈 Frequency",
+            "😄 Deepfake",
+            "🔀 Resampling",
+            "🛍️ Steganography",
+            "🔑 Hash Verification"
+        ])
+
+        # 1. ELA TAB (On-Demand Execution)
+        with tab_ela:
+            st.markdown("#### 🕵️ 1. Error Level Analysis (ELA)")
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
                 st.markdown('<div class="param-card"><b>⚙️ ELA User Selectors</b></div>', unsafe_allow_html=True)
-                sel_q = st.slider("JPEG Compression Quality", 50, 98, 90, 1, key="ela_exp_q")
-                sel_scale = st.slider("Error Scale Factor", 5, 50, 20, 5, key="ela_exp_scale")
-                run_ela = st.button("🚀 Test ELA Compression", key="btn_exp_ela", use_container_width=True)
+                sel_q = st.slider("JPEG Compression Quality", 50, 98, 90, 1, key="ela_tab_q")
+                sel_scale = st.slider("Error Scale Factor", 5, 50, 20, 5, key="ela_tab_scale")
+                run_ela = st.button("🚀 Test ELA Compression", key="btn_run_ela", use_container_width=True)
             with col_r:
                 if run_ela:
                     diff_map, _ = compute_ela(selected_img, quality=sel_q, scale=sel_scale)
-                    st.image(diff_map, caption=f"Live ELA Difference Residual (Q={sel_q}, Scale={sel_scale}x)", use_container_width=True)
+                    st.image(diff_map, caption=f"ELA Difference Residual (Q={sel_q}, Scale={sel_scale}x)", use_container_width=True)
                 else:
                     st.info("Adjust parameters on the left and click '🚀 Test ELA Compression' to run analysis.")
 
-        # 2. METADATA
-        with st.expander("📋 2. EXIF Metadata & Software Fingerprinting — Header & Provenance Audit", expanded=False):
+        # 2. METADATA TAB (On-Demand Execution)
+        with tab_meta:
+            st.markdown("#### 📋 2. EXIF Metadata & Software Fingerprinting")
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
                 st.markdown('<div class="param-card"><b>⚙️ Metadata Analyzer</b></div>', unsafe_allow_html=True)
-                run_meta = st.button("🚀 Extract & Test EXIF Metadata", key="btn_exp_meta", use_container_width=True)
+                run_meta = st.button("🚀 Extract & Test EXIF Metadata", key="btn_run_meta", use_container_width=True)
                 if run_meta:
                     st.metric("EXIF Health Status", meta_info["status"])
                     if meta_info["alerts"]:
@@ -945,12 +966,13 @@ if selected_img is not None:
                 else:
                     st.info("Click '🚀 Extract & Test EXIF Metadata' to inspect header structures.")
 
-        # 3. HISTOGRAM
-        with st.expander("📊 3. Advanced RGB Histogram & Tonal Forensics — Clipping & Comb Detection", expanded=False):
+        # 3. HISTOGRAM TAB (On-Demand Execution)
+        with tab_hist:
+            st.markdown("#### 📊 3. Advanced RGB Histogram & Tonal Forensics")
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
                 st.markdown('<div class="param-card"><b>⚙️ Tonal Distribution Audit</b></div>', unsafe_allow_html=True)
-                run_hist = st.button("🚀 Generate Histogram Analysis", key="btn_exp_hist", use_container_width=True)
+                run_hist = st.button("🚀 Generate Histogram Analysis", key="btn_run_hist", use_container_width=True)
             with col_r:
                 if run_hist:
                     hists, clipping_alerts = compute_histogram_metrics(img_np)
@@ -963,13 +985,14 @@ if selected_img is not None:
                 else:
                     st.info("Click '🚀 Generate Histogram Analysis' to compute pixel populations across 0–255 bins.")
 
-        # 4. NOISE/GHOST
-        with st.expander("👻 4. Noise Analysis & JPEG Ghost Detection — Compression Quality Sweeps", expanded=False):
+        # 4. NOISE/GHOST TAB (On-Demand Execution)
+        with tab_noise:
+            st.markdown("#### 👻 4. Noise Analysis & JPEG Ghost Detection")
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
                 st.markdown('<div class="param-card"><b>⚙️ Noise & Ghost Controls</b></div>', unsafe_allow_html=True)
-                ghost_q = st.select_slider("Ghost Quality Step", options=[70, 75, 80, 85, 90, 95], value=85, key="ghost_exp_q")
-                run_ghost = st.button("🚀 Detect JPEG Ghost & Noise", key="btn_exp_ghost", use_container_width=True)
+                ghost_q = st.select_slider("Ghost Quality Step", options=[70, 75, 80, 85, 90, 95], value=85, key="ghost_tab_q")
+                run_ghost = st.button("🚀 Detect JPEG Ghost & Noise", key="btn_run_ghost", use_container_width=True)
             with col_r:
                 if run_ghost:
                     ghost_ela, _ = compute_ela(selected_img, quality=ghost_q, scale=25)
@@ -981,8 +1004,9 @@ if selected_img is not None:
                 else:
                     st.info("Click '🚀 Detect JPEG Ghost & Noise' to test multi-compression differentials.")
 
-        # 5. QUANT TABLE
-        with st.expander("💾 5. JPEG Quantization Table (DQT) Analysis — 8×8 DCT Matrices", expanded=False):
+        # 5. QUANT TABLE TAB (On-Demand Execution)
+        with tab_quant:
+            st.markdown("#### 💾 5. JPEG Quantization Table (DQT) Analysis")
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
                 st.markdown("""
@@ -991,7 +1015,7 @@ if selected_img is not None:
                     Extracts native 8×8 DCT quantization tables to determine compression history and camera profile.
                 </div>
                 """, unsafe_allow_html=True)
-                run_quant = st.button("🚀 Analyze Quantization Tables", key="btn_exp_quant", use_container_width=True)
+                run_quant = st.button("🚀 Analyze Quantization Tables", key="btn_run_quant", use_container_width=True)
             with col_r:
                 if run_quant:
                     q_tables = extract_quantization_tables(selected_img)
@@ -1004,13 +1028,14 @@ if selected_img is not None:
                 else:
                     st.info("Click '🚀 Analyze Quantization Tables' to inspect native 8×8 DCT matrices.")
 
-        # 6. CMFD
-        with st.expander("🔄 6. Copy-Move Forgery Detection (CMFD) — Keypoint Descriptor Vector Matching", expanded=False):
+        # 6. CMFD TAB (On-Demand Execution)
+        with tab_cmfd:
+            st.markdown("#### 🔄 6. Copy-Move Forgery Detection (CMFD)")
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
                 st.markdown('<div class="param-card"><b>⚙️ Keypoint Matching Parameters</b></div>', unsafe_allow_html=True)
-                cmfd_dist = st.slider("Minimum Euclidean Distance", 10, 100, 35, 5, key="cmfd_exp_dist")
-                run_cmfd = st.button("🚀 Detect Copy-Move Forgery", key="btn_exp_cmfd", use_container_width=True)
+                cmfd_dist = st.slider("Minimum Euclidean Distance", 10, 100, 35, 5, key="cmfd_tab_dist")
+                run_cmfd = st.button("🚀 Detect Copy-Move Forgery", key="btn_run_cmfd", use_container_width=True)
             with col_r:
                 if run_cmfd:
                     cmfd_vis, cmfd_matches = compute_cmfd_keypoints(img_np, min_dist=cmfd_dist)
@@ -1022,8 +1047,9 @@ if selected_img is not None:
                 else:
                     st.info("Click '🚀 Detect Copy-Move Forgery' to compute duplicate block clusters.")
 
-        # 7. PRNU
-        with st.expander("📡 7. Photo Response Non-Uniformity (PRNU) — Physical Sensor Fingerprint", expanded=False):
+        # 7. PRNU TAB (On-Demand Execution)
+        with tab_prnu:
+            st.markdown("#### 📡 7. Photo Response Non-Uniformity (PRNU)")
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
                 st.markdown("""
@@ -1032,15 +1058,16 @@ if selected_img is not None:
                     Isolates physical CMOS sensor pattern noise by filtering out low-frequency semantics with a 5×5 SRM filter.
                 </div>
                 """, unsafe_allow_html=True)
-                run_prnu = st.button("🚀 Extract PRNU Fingerprint", key="btn_exp_prnu", use_container_width=True)
+                run_prnu = st.button("🚀 Extract PRNU Fingerprint", key="btn_run_prnu", use_container_width=True)
             with col_r:
                 if run_prnu:
                     st.image(srm_map, caption="SRM High-Pass Sensor Noise Fingerprint", use_container_width=True)
                 else:
                     st.info("Click '🚀 Extract PRNU Fingerprint' to isolate high-pass CMOS sensor noise.")
 
-        # 8. FREQUENCY
-        with st.expander("📈 8. Frequency Domain 2D-FFT Power Spectrum — Harmonic Grid Spike Detection", expanded=False):
+        # 8. FREQUENCY TAB (On-Demand Execution)
+        with tab_freq:
+            st.markdown("#### 📈 8. Frequency Domain 2D-FFT Power Spectrum")
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
                 st.markdown("""
@@ -1049,15 +1076,16 @@ if selected_img is not None:
                     Maps spatial data to the frequency domain to expose periodic lattice spikes caused by GANs or resampling grids.
                 </div>
                 """, unsafe_allow_html=True)
-                run_fft = st.button("🚀 Run 2D-FFT Frequency Analysis", key="btn_exp_fft", use_container_width=True)
+                run_fft = st.button("🚀 Run 2D-FFT Frequency Analysis", key="btn_run_fft", use_container_width=True)
             with col_r:
                 if run_fft:
                     st.image(fft_map, caption="2D-FFT Magnitude Power Spectrum", use_container_width=True)
                 else:
                     st.info("Click '🚀 Run 2D-FFT Frequency Analysis' to map harmonic frequency spikes.")
 
-        # 9. DEEPFAKE
-        with st.expander("😄 9. Deepfake & Boundary Discontinuity — Facial Contour & Seam Blending", expanded=False):
+        # 9. DEEPFAKE TAB (On-Demand Execution)
+        with tab_deepfake:
+            st.markdown("#### 😄 9. Deepfake & Boundary Discontinuity")
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
                 st.markdown("""
@@ -1066,15 +1094,16 @@ if selected_img is not None:
                     Examines blending boundaries and edge discontinuities using second-order Canny-Laplacian gradients to detect AI face swaps.
                 </div>
                 """, unsafe_allow_html=True)
-                run_df = st.button("🚀 Detect Deepfake Seams", key="btn_exp_df", use_container_width=True)
+                run_df = st.button("🚀 Detect Deepfake Seams", key="btn_run_df", use_container_width=True)
             with col_r:
                 if run_df:
                     st.image(edge_map, caption="Canny-Laplacian Boundary Discontinuity Map", use_container_width=True)
                 else:
                     st.info("Click '🚀 Detect Deepfake Seams' to analyze edge blending and seam discontinuities.")
 
-        # 10. RESAMPLING
-        with st.expander("🔀 10. Resampling & Luminance Gradients — Lighting Angle Direction Vectors", expanded=False):
+        # 10. RESAMPLING TAB (On-Demand Execution)
+        with tab_resam:
+            st.markdown("#### 🔀 10. Resampling & Luminance Gradients")
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
                 st.markdown("""
@@ -1083,19 +1112,20 @@ if selected_img is not None:
                     Calculates illumination direction fields across the V-channel to expose contradictory light sources in spliced elements.
                 </div>
                 """, unsafe_allow_html=True)
-                run_resam = st.button("🚀 Detect Resampling & Light Angle", key="btn_exp_resam", use_container_width=True)
+                run_resam = st.button("🚀 Detect Resampling & Light Angle", key="btn_run_resam", use_container_width=True)
             with col_r:
                 if run_resam:
                     st.image(luma_map, caption="Sobel Luminance Angle Vector Field", use_container_width=True)
                 else:
                     st.info("Click '🚀 Detect Resampling & Light Angle' to compute lighting gradient vector angles.")
 
-        # 11. STEGANOGRAPHY
-        with st.expander("🛍️ 11. Steganography & LSB Analysis — Bit-Plane Randomness & Anomaly Heatmaps", expanded=False):
+        # 11. STEGANOGRAPHY TAB (On-Demand Execution)
+        with tab_stego:
+            st.markdown("#### 🛍️ 11. Steganography & LSB Analysis")
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
                 st.markdown('<div class="param-card"><b>⚙️ LSB Bit-Plane Randomness</b></div>', unsafe_allow_html=True)
-                run_stego = st.button("🚀 Detect Hidden LSB Payloads", key="btn_exp_stego", use_container_width=True)
+                run_stego = st.button("🚀 Detect Hidden LSB Payloads", key="btn_run_stego", use_container_width=True)
             with col_r:
                 if run_stego:
                     lsb_composite, lsb_ones_pct, stego_risk = compute_steganography_lsb(img_np)
@@ -1105,12 +1135,13 @@ if selected_img is not None:
                 else:
                     st.info("Click '🚀 Detect Hidden LSB Payloads' to analyze bit-plane randomness.")
 
-        # 12. HASH
-        with st.expander("🔑 12. Cryptographic & Perceptual Hash Verification — Exact & Resilient Verification", expanded=False):
+        # 12. HASH TAB (On-Demand Execution)
+        with tab_hash:
+            st.markdown("#### 🔑 12. Cryptographic & Perceptual Hash Verification")
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
                 st.markdown('<div class="param-card"><b>⚙️ Cryptographic Exact Hashes</b></div>', unsafe_allow_html=True)
-                run_hash = st.button("🚀 Verify Ledger Hash", key="btn_exp_hash", use_container_width=True)
+                run_hash = st.button("🚀 Verify Ledger Hash", key="btn_run_hash", use_container_width=True)
             with col_r:
                 if run_hash:
                     st.code(f"SHA-256: {hashes['SHA-256']}\nMD5:     {hashes['MD5']}", language="bash")
