@@ -24,10 +24,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Dark Forensics & High-Contrast Button Styling
+# Dark Forensics & High-Contrast Cyber Styling
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700;800&family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
     
     html, body, [class*="css"] {
         font-family: 'Plus Jakarta Sans', sans-serif;
@@ -58,16 +58,14 @@ st.markdown("""
         100% { transform: scale(1); filter: drop-shadow(0 0 2px #38bdf8); }
     }
 
-    /* COMPLETE FIX FOR WHITE BUTTONS (PRIMARY, SECONDARY, DOWNLOAD) */
+    /* HIGH-CONTRAST CLICKABLE BUTTONS & DOWNLOAD BOXES */
     button,
     button[kind="secondary"],
     button[kind="primary"],
     div[data-testid="stButton"] > button,
     div[data-testid="stDownloadButton"] > button,
     .stButton > button,
-    .stDownloadButton > button,
-    [data-testid="baseButton-secondary"],
-    [data-testid="baseButton-primary"] {
+    .stDownloadButton > button {
         background: linear-gradient(135deg, #0b1220 0%, #1e293b 100%) !important;
         color: #38bdf8 !important;
         border: 1.8px solid #38bdf8 !important;
@@ -83,9 +81,7 @@ st.markdown("""
     button span,
     button *,
     div[data-testid="stButton"] > button *,
-    div[data-testid="stDownloadButton"] > button *,
-    .stButton > button *,
-    .stDownloadButton > button * {
+    div[data-testid="stDownloadButton"] > button * {
         color: #38bdf8 !important;
         font-weight: 700 !important;
         font-family: 'JetBrains Mono', monospace !important;
@@ -93,9 +89,7 @@ st.markdown("""
 
     button:hover,
     div[data-testid="stButton"] > button:hover,
-    div[data-testid="stDownloadButton"] > button:hover,
-    .stButton > button:hover,
-    .stDownloadButton > button:hover {
+    div[data-testid="stDownloadButton"] > button:hover {
         background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%) !important;
         color: #ffffff !important;
         border-color: #7dd3fc !important;
@@ -103,9 +97,7 @@ st.markdown("""
         transform: translateY(-2px) !important;
     }
 
-    button:hover *,
-    div[data-testid="stButton"] > button:hover *,
-    div[data-testid="stDownloadButton"] > button:hover * {
+    button:hover * {
         color: #ffffff !important;
     }
 
@@ -453,7 +445,7 @@ def extract_solid_silhouette_mask(pred_mask, srm_raw, ela_raw, orig_w, orig_h, s
             _, gt_bin = cv2.threshold(gt_resized, 127, 255, cv2.THRESH_BINARY)
             return gt_bin
 
-    # Ensure all components are 2D single-channel float arrays
+    # Ensure all inputs are strictly 2D single-channel arrays
     if len(pred_mask.shape) == 3:
         pred_mask = cv2.cvtColor(pred_mask, cv2.COLOR_RGB2GRAY)
     if len(srm_raw.shape) == 3:
@@ -856,7 +848,7 @@ if selected_img is not None:
         )
 
         st.write("---")
-        st.subheader("🖼️ 8-Stage Forensic Decomposition Grid")
+        st.subheader("🖼️️ 8-Stage Forensic Decomposition Grid")
 
         # Row 1
         r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
@@ -917,7 +909,7 @@ if selected_img is not None:
             "📈 Frequency",
             "😄 Deepfake",
             "🔀 Resampling",
-            "🛍️ Steganography",
+            "🛍️️ Steganography",
             "🔑 Hash Verification"
         ])
 
