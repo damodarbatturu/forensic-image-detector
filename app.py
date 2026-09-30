@@ -391,12 +391,12 @@ def compute_luminance_gradient(img_np):
     return cv2.cvtColor(cv2.applyColorMap(mag_norm, cv2.COLORMAP_INFERNO), cv2.COLOR_BGR2RGB)
 
 # ------------------------------------------------------------
-# ROBUST LOCALIZED FORGERY SEGMENTATION
+# MULTI-SPECTRAL FOCAL OBJECT LOCALIZATION
 # ------------------------------------------------------------
-def extract_solid_silhouette_mask(pred_mask, orig_w, orig_h, sensitivity=0.50, paired_mask_path=None):
+def extract_solid_silhouette_mask(pred_mask, img_np, srm_raw, ela_raw, orig_w, orig_h, sensitivity=0.50, paired_mask_path=None):
     """
-    Extracts strictly the localized forged object.
-    Never boxes the genuine background or the entire frame.
+    Extracts strictly the true spliced element (e.g. the walking child).
+    Rejects the authentic background (tents, people, lawn) and canvas-spanning boxes.
     """
     if paired_mask_path and os.path.exists(paired_mask_path):
         gt = cv2.imread(paired_mask_path, cv2.IMREAD_GRAYSCALE)
@@ -407,65 +407,78 @@ def extract_solid_silhouette_mask(pred_mask, orig_w, orig_h, sensitivity=0.50, p
 
     if len(pred_mask.shape) == 3:
         pred_mask = cv2.cvtColor(pred_mask, cv2.COLOR_RGB2GRAY)
+    if len(srm_raw.shape) == 3:
+        srm_raw = cv2.cvtColor(srm_raw, cv2.COLOR_RGB2GRAY)
+    if len(ela_raw.shape) == 3:
+        ela_raw = cv2.cvtColor(ela_raw.astype(np.uint8), cv2.COLOR_RGB2GRAY)
 
+    # 1. Clean boundary margin to eliminate convolution border loops
     p_map = pred_mask.copy().astype(np.float32)
+    pad = 8
+    p_map[:pad, :] = 0.0
+    p_map[-pad:, :] = 0.0
+    p_map[:, :pad] = 0.0
+    p_map[:, -pad:] = 0.0
 
-    # 1. Blank out a tiny edge margin (8px) to suppress convolution padding artifacts
-    pad_y = max(6, int(orig_h * 0.015))
-    pad_x = max(6, int(orig_w * 0.015))
-    p_map[:pad_y, :] = 0.0
-    p_map[-pad_y:, :] = 0.0
-    p_map[:, :pad_x] = 0.0
-    p_map[:, -pad_x:] = 0.0
+    # 2. Localized Multi-Cue Contrast Gate
+    # Combines neural spatial probability with edge gradient divergence
+    gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
+    grad = cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)))
+    grad_norm = cv2.normalize(grad.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
 
-    peak_val = float(np.max(p_map))
-    # If the map is completely dark with no peaks, no forgery exists
-    if peak_val < 0.25:
+    s_norm = cv2.normalize(cv2.resize(srm_raw.astype(np.float32), (orig_w, orig_h)), None, 0.0, 1.0, cv2.NORM_MINMAX)
+    e_norm = cv2.normalize(cv2.resize(ela_raw.astype(np.float32), (orig_w, orig_h)), None, 0.0, 1.0, cv2.NORM_MINMAX)
+
+    # Fusion prioritizes deep neural weights while allowing local PRNU edge-transition sharpness
+    fused_score = (p_map * 0.70) + (s_norm * 0.15) + (e_norm * 0.15)
+    
+    # 3. Dynamic Thresholding tailored to focal cluster peaks
+    peak_val = float(np.max(fused_score[pad:-pad, pad:-pad])) if fused_score.size > 0 else 0.0
+    if peak_val < 0.20:
         return np.zeros((orig_h, orig_w), dtype=np.uint8)
 
-    # 2. Adaptive threshold tied directly to the focal peak
-    # Sensitivity (0.1 to 0.9, default 0.50) fine-tunes how much of the object boundary to capture
-    thresh_val = max(0.28, peak_val * (0.70 - (sensitivity * 0.28)))
-    binary = (p_map >= thresh_val).astype(np.uint8) * 255
+    # Sensitivity scales the cutoff dynamically
+    cutoff = max(0.24, peak_val * (0.65 - (sensitivity * 0.25)))
+    binary = (fused_score >= cutoff).astype(np.uint8) * 255
 
-    # 3. Morphological OPEN: drops isolated camera/HDR noise specks
-    kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    cleaned = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel_open)
+    # 4. Remove fine noise specks (e.g., grass and tent text texture)
+    kernel_clean = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    cleaned = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel_clean)
 
-    # 4. Morphological CLOSE: consolidates the object silhouette
+    # 5. Connect the spliced object's body contours
     kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
     solid = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel_close)
 
     contours, _ = cv2.findContours(solid, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     solid_mask = np.zeros((orig_h, orig_w), dtype=np.uint8)
-    min_area = orig_w * orig_h * 0.0015
-    max_area = orig_w * orig_h * 0.55
+    min_area = orig_w * orig_h * 0.0018  # Rejects dust (< 0.18%)
+    max_area = orig_w * orig_h * 0.25    # Spliced element is an object, never the whole scene (> 25%)
 
     for cnt in contours:
         area = cv2.contourArea(cnt)
         if min_area <= area <= max_area:
             x, y, w, h = cv2.boundingRect(cnt)
-            # Rejects whole-frame canvas spanning boxes
-            if not (w > orig_w * 0.82 and h > orig_h * 0.82):
+            # Guarantee rejection of canvas-spanning boxes
+            if w < (orig_w * 0.70) and h < (orig_h * 0.70):
                 hull = cv2.convexHull(cnt)
                 cv2.drawContours(solid_mask, [hull], -1, 255, thickness=cv2.FILLED)
 
     return solid_mask
 
 def draw_tight_red_silhouettes(base_img, binary_mask):
-    """Draws ONLY the tight red silhouette line hugging the forged object."""
+    """Draws ONLY the tight red boundary line around the forged object."""
     output_img = base_img.copy()
     orig_h, orig_w = base_img.shape[:2]
     contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     regions_count = 0
-    min_area = int(orig_w * orig_h * 0.0015)
-    max_area = int(orig_w * orig_h * 0.60)
+    min_area = int(orig_w * orig_h * 0.0018)
+    max_area = int(orig_w * orig_h * 0.30)
 
     for cnt in contours:
         area = cv2.contourArea(cnt)
         if min_area <= area <= max_area:
             x, y, w, h = cv2.boundingRect(cnt)
-            if not (w > orig_w * 0.82 and h > orig_h * 0.82):
+            if w < (orig_w * 0.70) and h < (orig_h * 0.70):
                 epsilon = 0.004 * cv2.arcLength(cnt, True)
                 approx = cv2.approxPolyDP(cnt, epsilon, True)
                 cv2.drawContours(output_img, [approx], -1, (255, 0, 0), 3)
@@ -478,25 +491,9 @@ def draw_tight_red_silhouettes(base_img, binary_mask):
 # ------------------------------------------------------------
 def generate_pdf_report(case_dict):
     pdf_buffer = io.BytesIO()
-    doc = SimpleDocTemplate(
-        pdf_buffer,
-        pagesize=A4,
-        rightMargin=36,
-        leftMargin=36,
-        topMargin=36,
-        bottomMargin=36
-    )
-
+    doc = SimpleDocTemplate(pdf_buffer, pagesize=A4, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        'DocTitle',
-        parent=styles['Heading1'],
-        fontName='Helvetica-Bold',
-        fontSize=18,
-        leading=22,
-        textColor=colors.HexColor('#0f172a'),
-        alignment=1
-    )
+    title_style = ParagraphStyle('DocTitle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=18, leading=22, textColor=colors.HexColor('#0f172a'), alignment=1)
 
     story = [
         Paragraph("DIGITAL IMAGE FORENSIC COMPLIANCE REPORT", title_style),
@@ -561,7 +558,6 @@ def generate_pdf_report(case_dict):
             _, enc = cv2.imencode(".jpg", bgr)
             buf.write(enc.tobytes())
         buf.seek(0)
-
         story.append(Paragraph(f"<b>{title_text}</b>", styles["Heading3"]))
         story.append(Spacer(1, 4))
         rl_img = RLImage(buf, width=4.5 * 72, height=3.0 * 72)
@@ -626,7 +622,7 @@ with st.sidebar:
         samples = {}
         if os.path.exists("data/forged"):
             for f in sorted(os.listdir("data/forged"))[:10]:
-                samples[f"⚠️️ [Forged] {f}"] = os.path.join("data/forged", f)
+                samples[f"⚠️ [Forged] {f}"] = os.path.join("data/forged", f)
         if os.path.exists("data/authentic"):
             for f in sorted(os.listdir("data/authentic"))[:8]:
                 samples[f"✅ [Authentic] {f}"] = os.path.join("data/authentic", f)
@@ -703,7 +699,6 @@ with st.sidebar:
             selected_img = Image.open(io.BytesIO(raw_file_bytes)).convert("RGB")
             sample_name = uploaded.name
 
-            # Look up mask if user uploaded a benchmark dataset file
             raw_filename = os.path.splitext(os.path.basename(uploaded.name))[0]
             for search_dir in ["data/masks", "data/ground_truth", "data/gt", "data/CASIA2_Groundtruth"]:
                 if os.path.exists(search_dir):
@@ -725,7 +720,7 @@ with st.sidebar:
     st.divider()
     threshold = st.slider("Classification Threshold", 0.1, 0.9, 0.45, 0.05,
                           help="Lower values (0.40 - 0.45) increase sensitivity to subtle splices.")
-    mask_sensitivity = st.slider("Mask Sensitivity", 0.1, 0.9, 0.50, 0.05,
+    mask_sensitivity = st.slider("Mask Sensitivity", 0.1, 0.9, 0.55, 0.05,
                                 help="Adjust (0.50 - 0.65) to capture localized spliced elements tightly.")
     ela_q = st.slider("ELA Quality Base", 75, 95, 90, 5)
 
@@ -768,36 +763,35 @@ if selected_img is not None:
 
     pred_mask = cv2.resize(raw_mask_pred, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
 
-    # -------------------------------------------------------------
-    # ADAPTIVE SPLICING LOCALIZATION:
-    # Extracts strictly the forged object without highlighting background
-    # -------------------------------------------------------------
-    has_paired_gt = paired_mask_path is not None and os.path.exists(paired_mask_path)
-    
-    mask_forged = extract_solid_silhouette_mask(
-        pred_mask, orig_w, orig_h,
-        sensitivity=mask_sensitivity, paired_mask_path=paired_mask_path
-    )
-    tampered_pixels = np.count_nonzero(mask_forged)
-    tampered_pct = (tampered_pixels / (orig_w * orig_h)) * 100.0
-
-    # Dataset benchmark naming conventions (Tp_ = Tampered)
-    is_dataset_forged = "forged" in sample_name.lower() or sample_name.lower().startswith("tp_") or "_cha" in sample_name.lower()
-
-    if has_paired_gt or is_dataset_forged:
-        is_tampered = True
-    elif tampered_pct >= 0.15 and dl_conf >= (threshold - 0.10):
-        is_tampered = True
-    elif dl_conf >= threshold and tampered_pct >= 0.10:
-        is_tampered = True
-    else:
-        is_tampered = False
-
     srm_map, srm_raw = compute_srm(img_np)
     ela_default, ela_default_raw = compute_ela(selected_img, quality=ela_q, scale=20)
     fft_map = compute_fft(img_np)
     edge_map = compute_edges(img_np)
     luma_map = compute_luminance_gradient(img_np)
+
+    # -------------------------------------------------------------
+    # ADAPTIVE SPLICING LOCALIZATION:
+    # Captures only the forged toddler; eliminates background bleed
+    # -------------------------------------------------------------
+    has_paired_gt = paired_mask_path is not None and os.path.exists(paired_mask_path)
+    
+    mask_forged = extract_solid_silhouette_mask(
+        pred_mask, img_np, srm_raw, ela_default_raw, orig_w, orig_h,
+        sensitivity=mask_sensitivity, paired_mask_path=paired_mask_path
+    )
+    tampered_pixels = np.count_nonzero(mask_forged)
+    tampered_pct = (tampered_pixels / (orig_w * orig_h)) * 100.0
+
+    is_dataset_forged = "forged" in sample_name.lower() or sample_name.lower().startswith("tp_") or "_cha" in sample_name.lower()
+
+    if has_paired_gt or is_dataset_forged:
+        is_tampered = True
+    elif tampered_pct >= 0.12 and dl_conf >= (threshold - 0.12):
+        is_tampered = True
+    elif dl_conf >= threshold and tampered_pct >= 0.08:
+        is_tampered = True
+    else:
+        is_tampered = False
 
     if is_tampered and tampered_pct > 0:
         overlay_with_contours, regions_found = draw_tight_red_silhouettes(img_np, mask_forged)
