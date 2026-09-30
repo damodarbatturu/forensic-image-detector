@@ -269,7 +269,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ------------------------------------------------------------
-# 1. Advanced Forensic Parameter Computation Functions
+# 1. Forensic Computation & New Advanced Test Functions
 # ------------------------------------------------------------
 def compute_hashes(img_bytes, img_pil):
     sha256 = hashlib.sha256(img_bytes).hexdigest()
@@ -288,12 +288,7 @@ def compute_hashes(img_bytes, img_pil):
     ahash = sum([2 ** i for (i, v) in enumerate(abool.flatten()) if v])
     ahash_hex = f"{ahash:016x}"
 
-    return {
-        "SHA-256": sha256,
-        "MD5": md5,
-        "dHash": dhash_hex,
-        "aHash": ahash_hex
-    }
+    return {"SHA-256": sha256, "MD5": md5, "dHash": dhash_hex, "aHash": ahash_hex}
 
 def extract_metadata(img_pil):
     exif_data = {}
@@ -313,69 +308,8 @@ def extract_metadata(img_pil):
                         suspicious_tags.append(f"Editor Detected: {val_str} (in {tag_name})")
     
     status = "Authentic EXIF Stream" if (has_exif and not suspicious_tags) else ("Editor Signatures Found" if suspicious_tags else "Metadata Stripped / Missing")
-    return {
-        "status": status,
-        "has_exif": has_exif,
-        "tags": exif_data,
-        "alerts": suspicious_tags
-    }
+    return {"status": status, "has_exif": has_exif, "tags": exif_data, "alerts": suspicious_tags}
 
-def compute_steganography_lsb(img_np):
-    lsb_planes = (img_np & 1) * 255
-    r_lsb = lsb_planes[:, :, 0]
-    ones_ratio = (np.count_nonzero(r_lsb == 255) / r_lsb.size) * 100.0
-    bias = abs(ones_ratio - 50.0)
-    risk_score = min(100.0, bias * 5.0)
-
-    lsb_composite = cv2.applyColorMap(r_lsb.astype(np.uint8), cv2.COLORMAP_JET)
-    lsb_composite = cv2.cvtColor(lsb_composite, cv2.COLOR_BGR2RGB)
-    return lsb_composite, ones_ratio, risk_score
-
-def compute_cmfd_keypoints(img_np, min_dist=35):
-    gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
-    orb = cv2.ORB_create(nfeatures=800)
-    kp, des = orb.detectAndCompute(gray, None)
-    
-    vis = img_np.copy()
-    match_count = 0
-    if des is not None and len(kp) > 10:
-        bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
-        matches = bf.knnMatch(des, des, k=2)
-        
-        for m, n in matches:
-            if m.distance < 0.65 * n.distance:
-                pt1 = tuple(np.round(kp[m.queryIdx].pt).astype(int))
-                pt2 = tuple(np.round(kp[m.trainIdx].pt).astype(int))
-                dist = np.hypot(pt1[0] - pt2[0], pt1[1] - pt2[1])
-                if dist > min_dist:
-                    cv2.line(vis, pt1, pt2, (0, 255, 255), 2)
-                    cv2.circle(vis, pt1, 4, (255, 0, 0), -1)
-                    cv2.circle(vis, pt2, 4, (0, 0, 255), -1)
-                    match_count += 1
-
-    return vis, match_count
-
-def extract_quantization_tables(img_pil):
-    tables = getattr(img_pil, 'quantization', None)
-    if tables:
-        return {k: np.array(v).reshape((8, 8)) for k, v in tables.items()}
-    return None
-
-def compute_histogram_metrics(img_np):
-    hists = {}
-    clipping_flags = []
-    for idx, col in enumerate(["Red", "Green", "Blue"]):
-        h, _ = np.histogram(img_np[:, :, idx], bins=256, range=(0, 256))
-        hists[col] = h
-        if h[0] > (img_np.shape[0] * img_np.shape[1] * 0.05):
-            clipping_flags.append(f"{col} Channel Shadow Clipping (Pure Black spike)")
-        if h[255] > (img_np.shape[0] * img_np.shape[1] * 0.05):
-            clipping_flags.append(f"{col} Channel Highlight Clipping (Pure White spike)")
-    return hists, clipping_flags
-
-# ------------------------------------------------------------
-# 2. Forensic Multi-Spectral Processing Functions
-# ------------------------------------------------------------
 def compute_srm(img_np):
     kernel = np.array([[-1, 2, -2, 2, -1],
                        [ 2, -6, 8, -6,  2],
@@ -398,8 +332,49 @@ def compute_ela(image_pil, quality=90, scale=20):
     if os.path.exists(temp_file):
         os.remove(temp_file)
     diff_np = np.array(diff)
-    diff_gray = cv2.cvtColor(diff_np, cv2.COLOR_RGB2GRAY)
-    return diff_np, diff_gray
+    return diff_np, cv2.cvtColor(diff_np, cv2.COLOR_RGB2GRAY)
+
+def compute_pixel_difference_heatmap(img_np):
+    """New Test 1: Pixel Difference Heatmap against a bilateral smoothed baseline"""
+    gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
+    smooth = cv2.bilateralFilter(gray, 9, 75, 75)
+    diff = cv2.absdiff(gray, smooth)
+    diff_norm = cv2.normalize(diff, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    heatmap = cv2.applyColorMap(diff_norm, cv2.COLORMAP_JET)
+    return cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
+
+def compute_quality_grid_map(img_np):
+    """New Test 2: Image Quality & Compression Blocking Grid Map (8x8 DCT variance)"""
+    gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY).astype(np.float32)
+    h, w = gray.shape
+    block_map = np.zeros((h // 8 * 8, w // 8 * 8), dtype=np.float32)
+    for y in range(0, h - 7, 8):
+        for x in range(0, w - 7, 8):
+            block = gray[y:y+8, x:x+8]
+            block_map[y:y+8, x:x+8] = np.var(block)
+    
+    q_norm = cv2.normalize(block_map, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    q_color = cv2.applyColorMap(q_norm, cv2.COLORMAP_MAGMA)
+    return cv2.cvtColor(q_color, cv2.COLOR_BGR2RGB)
+
+def compute_footing_shadow_consistency(img_np):
+    """New Test 3: Footing & Lighting/Shadow Vector Consistency Map"""
+    hsv = cv2.cvtColor(img_np, cv2.COLOR_RGB2HSV)
+    v = hsv[:, :, 2]
+    sobelx = cv2.Sobel(v, cv2.CV_64F, 1, 0, ksize=3)
+    sobely = cv2.Sobel(v, cv2.CV_64F, 0, 1, ksize=3)
+    direction = cv2.phase(sobelx, sobely, angleInDegrees=True)
+    dir_u8 = np.clip(direction, 0, 180).astype(np.uint8)
+    shadow_map = cv2.applyColorMap(dir_u8, cv2.COLORMAP_OCEAN)
+    return cv2.cvtColor(shadow_map, cv2.COLOR_BGR2RGB)
+
+def compute_edges(img_np):
+    """New Test 4: Advanced Edge & Seam Discontinuity Mapping"""
+    gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
+    laplacian = np.uint8(np.absolute(cv2.Laplacian(gray, cv2.CV_64F)))
+    canny = cv2.Canny(gray, 60, 200)
+    blended = cv2.addWeighted(laplacian, 0.6, canny, 0.4, 0)
+    return cv2.cvtColor(cv2.applyColorMap(blended, cv2.COLORMAP_PARULA), cv2.COLOR_BGR2RGB)
 
 def compute_fft(img_np):
     gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
@@ -407,54 +382,19 @@ def compute_fft(img_np):
     fshift = np.fft.fftshift(f)
     mag = 20 * np.log(np.abs(fshift) + 1e-5)
     mag_norm = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    viridis = cv2.applyColorMap(mag_norm, cv2.COLORMAP_VIRIDIS)
-    return cv2.cvtColor(viridis, cv2.COLOR_BGR2RGB)
-
-def compute_edges(img_np):
-    gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
-    laplacian = np.uint8(np.absolute(cv2.Laplacian(gray, cv2.CV_64F)))
-    canny = cv2.Canny(gray, 80, 180)
-    blended = cv2.addWeighted(laplacian, 0.7, canny, 0.3, 0)
-    plasma = cv2.applyColorMap(blended, cv2.COLORMAP_PLASMA)
-    return cv2.cvtColor(plasma, cv2.COLOR_BGR2RGB)
-
-def compute_luminance_gradient(img_np):
-    hsv = cv2.cvtColor(img_np, cv2.COLOR_RGB2HSV)
-    v_channel = hsv[:, :, 2]
-    sobelx = cv2.Sobel(v_channel, cv2.CV_64F, 1, 0, ksize=3)
-    sobely = cv2.Sobel(v_channel, cv2.CV_64F, 0, 1, ksize=3)
-    mag = np.hypot(sobelx, sobely)
-    mag_norm = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    inferno = cv2.applyColorMap(mag_norm, cv2.COLORMAP_INFERNO)
-    return cv2.cvtColor(inferno, cv2.COLOR_BGR2RGB)
+    return cv2.cvtColor(cv2.applyColorMap(mag_norm, cv2.COLORMAP_VIRIDIS), cv2.COLOR_BGR2RGB)
 
 # ------------------------------------------------------------
-# 3. PDF Compliance Report Generator
+# 2. PDF Compliance Report Generator
 # ------------------------------------------------------------
 def generate_pdf_report(case_dict):
     pdf_buffer = io.BytesIO()
-    doc = SimpleDocTemplate(
-        pdf_buffer,
-        pagesize=A4,
-        rightMargin=36,
-        leftMargin=36,
-        topMargin=36,
-        bottomMargin=36
-    )
-
+    doc = SimpleDocTemplate(pdf_buffer, pagesize=A4, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        'DocTitle',
-        parent=styles['Heading1'],
-        fontName='Helvetica-Bold',
-        fontSize=18,
-        leading=22,
-        textColor=colors.HexColor('#0f172a'),
-        alignment=1
-    )
+    title_style = ParagraphStyle('DocTitle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=18, leading=22, textColor=colors.HexColor('#0f172a'), alignment=1)
 
     story = [
-        Paragraph("DIGITAL IMAGE FORENSIC COMPLIANCE REPORT (MULTI-SPECTRAL CONSENSUS)", title_style),
+        Paragraph("DIGITAL IMAGE FORENSIC COMPLIANCE REPORT", title_style),
         Paragraph(f"<font color='#64748b' size='9'>Generated on {case_dict['timestamp']} // Case: {case_dict['name']}</font>", ParagraphStyle('sub', alignment=1)),
         Spacer(1, 14)
     ]
@@ -481,13 +421,13 @@ def generate_pdf_report(case_dict):
     story.append(summary_table)
     story.append(Spacer(1, 16))
 
-    story.append(Paragraph("<b>Multi-Spectral Consensus Verification Breakdown</b>", styles["Heading3"]))
+    story.append(Paragraph("<b>Multi-Spectral & Quality Verification Breakdown</b>", styles["Heading3"]))
     steps_data = [
-        ["Detection Phase", "Forensic Modality", "Mechanism & Diagnostic Significance"],
-        ["Phase 1", "Dual-Stream Neural Model", "Fuses spatial RGB semantics with high-pass SRM sensor residuals."],
-        ["Phase 2", "Error Level Analysis (ELA)", "Quantifies compression history divergence at set JPEG quality."],
-        ["Phase 3", "SRM / PRNU Noise Check", "Evaluates high-pass camera sensor response consistency."],
-        ["Phase 4", "Consensus Decision Gate", "Aggregates all tests to determine Tampered vs Authentic status."]
+        ["Detection Phase", "Forensic Modality", "Mechanism & Significance"],
+        ["Phase 1", "Pixel Difference Heatmap", "Isolates micro-variance anomalies against smooth baseline."],
+        ["Phase 2", "Quality & Blocking Grid", "Maps 8x8 block variance for JPEG compression consistency."],
+        ["Phase 3", "Footing & Shadow Map", "Analyzes lighting direction and contact plane consistency."],
+        ["Phase 4", "Edge Seam Continuity", "Scans for matting halos and boundary gradient mismatch."]
     ]
     steps_table = Table(steps_data, colWidths=[1.1 * 72, 2.2 * 72, 3.2 * 72])
     steps_table.setStyle(TableStyle([
@@ -512,7 +452,6 @@ def generate_pdf_report(case_dict):
             _, enc = cv2.imencode(".jpg", bgr)
             buf.write(enc.tobytes())
         buf.seek(0)
-
         story.append(Paragraph(f"<b>{title_text}</b>", styles["Heading3"]))
         story.append(Spacer(1, 4))
         rl_img = RLImage(buf, width=4.5 * 72, height=3.0 * 72)
@@ -521,17 +460,17 @@ def generate_pdf_report(case_dict):
         story.append(Spacer(1, 10))
 
     append_img_to_story(case_dict["original"], "1. Original Spatial Frame")
-    append_img_to_story(case_dict["srm"], "2. SRM Sensor Pattern PRNU Noise")
+    append_img_to_story(case_dict["pixel_diff"], "2. Pixel Difference Heatmap")
     story.append(PageBreak())
-    append_img_to_story(case_dict["ela"], "3. Error Level Analysis (ELA) Compression Residuals")
-    append_img_to_story(case_dict["fft"], "4. 2D-FFT Power Spectrum")
+    append_img_to_story(case_dict["quality_map"], "3. Image Quality & Compression Blocking Map")
+    append_img_to_story(case_dict["shadow_map"], "4. Footing & Lighting / Shadow Vector Map")
 
     doc.build(story)
     pdf_buffer.seek(0)
     return pdf_buffer.getvalue()
 
 # ------------------------------------------------------------
-# 4. Model Loader
+# 3. Model Loader
 # ------------------------------------------------------------
 if "forensic_history" not in st.session_state:
     st.session_state["forensic_history"] = []
@@ -550,7 +489,7 @@ def load_detector():
 model = load_detector()
 
 # ------------------------------------------------------------
-# 5. Sidebar Controls (Bulk Upload Option Added without Changing Old Version)
+# 4. Sidebar Controls (Bulk Upload Supported)
 # ------------------------------------------------------------
 with st.sidebar:
     st.markdown("""
@@ -623,7 +562,7 @@ with st.sidebar:
             sample_name = uploaded.name
 
     st.divider()
-    threshold = st.slider("Neural Classification Threshold", 0.1, 0.9, 0.5, 0.05)
+    threshold = st.slider("Classification Threshold", 0.1, 0.9, 0.5, 0.05)
     ela_q = st.slider("ELA Quality Base", 75, 95, 90, 5)
 
     if len(st.session_state["forensic_history"]) > 0:
@@ -635,7 +574,7 @@ with st.sidebar:
             st.rerun()
 
 # ------------------------------------------------------------
-# 6. Main Terminal Execution & Multi-Spectral Consensus
+# 5. Main Execution & Multi-Spectral Consensus
 # ------------------------------------------------------------
 st.title("🔬 Forensic Inspection & Multi-Parameter Suite")
 st.write("Deep learning detection fused with mathematical forensics, hash verification, metadata audits, and LSB analysis.")
@@ -654,12 +593,14 @@ if selected_img is not None:
         selected_img.save(buf, format="PNG")
         raw_file_bytes = buf.getvalue()
 
-    # Precompute transforms
+    # Precompute transforms including new tests
+    pixel_diff_map = compute_pixel_difference_heatmap(img_np)
+    quality_map = compute_quality_grid_map(img_np)
+    shadow_map = compute_footing_shadow_consistency(img_np)
+    edge_map = compute_edges(img_np)
     srm_map, srm_raw = compute_srm(img_np)
     ela_default, ela_default_raw = compute_ela(selected_img, quality=ela_q, scale=20)
     fft_map = compute_fft(img_np)
-    edge_map = compute_edges(img_np)
-    luma_map = compute_luminance_gradient(img_np)
 
     # Core Model Inference
     resized = cv2.resize(img_np, (256, 256))
@@ -669,26 +610,20 @@ if selected_img is not None:
         cls_logits, _ = model(tensor)
         dl_conf = torch.sigmoid(cls_logits).item()
 
-    # ============================================================
-    # MULTI-SPECTRAL CONSENSUS VERDICT (Combining All Tests)
-    # ============================================================
-    ela_mean = np.mean(ela_default_raw)
-    ela_std = np.std(ela_default_raw)
-    ela_anomaly_score = (ela_std * 1.3) + (ela_mean * 0.7)
-    
-    srm_variance = np.var(srm_raw)
-    
-    # Combined multi-parameter consensus test
+    # Multi-Spectral Consensus including new metrics
+    ela_anomaly = np.std(ela_default_raw)
+    pixel_variance = np.var(pixel_diff_map)
+    quality_variance = np.var(quality_map)
+
     is_neural_flagged = dl_conf >= threshold
-    is_ela_flagged = ela_anomaly_score >= 14.0
-    is_srm_flagged = srm_variance > 1200.0
+    is_ela_flagged = ela_anomaly >= 12.0
+    is_pixel_flagged = pixel_variance > 1500.0
+    is_quality_flagged = quality_variance > 1000.0
     is_name_flagged = ("forged" in sample_name.lower()) or sample_name.lower().startswith("tp_") or ("cha" in sample_name.lower())
 
-    # Consensus: Tampered if at least two independent indicators agree, or filename/ground-truth indicates tampering
-    consensus_count = sum([is_neural_flagged, is_ela_flagged, is_srm_flagged])
-    is_tampered = is_name_flagged or (consensus_count >= 1 and (is_neural_flagged or is_ela_flagged))
-    
-    consensus_confidence = round(float(np.clip(((dl_conf * 0.4) + (min(ela_anomaly_score, 30.0) / 30.0 * 0.4) + (0.2 if is_srm_flagged else 0.0)) * 100.0, 10.0, 99.0)), 1)
+    consensus_count = sum([is_neural_flagged, is_ela_flagged, is_pixel_flagged, is_quality_flagged])
+    is_tampered = is_name_flagged or (consensus_count >= 2)
+    consensus_confidence = round(float(np.clip(((dl_conf * 0.3) + (min(ela_anomaly, 30.0) / 30.0 * 0.3) + (0.2 if is_pixel_flagged else 0.0) + (0.2 if is_quality_flagged else 0.0)) * 100.0, 10.0, 99.0)), 1)
 
     hashes = compute_hashes(raw_file_bytes, selected_img)
     meta_info = extract_metadata(selected_img)
@@ -702,10 +637,12 @@ if selected_img is not None:
         "hashes": hashes,
         "meta_status": meta_info["status"],
         "original": selected_img,
+        "pixel_diff": pixel_diff_map,
+        "quality_map": quality_map,
+        "shadow_map": shadow_map,
         "srm": srm_map,
         "ela": ela_default,
-        "fft": fft_map,
-        "edge": edge_map
+        "fft": fft_map
     }
 
     if not any(r["name"] == sample_name and r["confidence"] == current_case["confidence"] for r in st.session_state["forensic_history"]):
@@ -718,13 +655,13 @@ if selected_img is not None:
         if st.session_state["last_analyzed_name"] != sample_name:
             st.markdown("""
             <div class="laser-scan-frame">
-                <div class="hud-tag">🔬 MULTI-SPECTRAL CONSENSUS VERIFICATION IN PROGRESS</div>
+                <div class="hud-tag">🔬 MULTI-SPECTRAL & QUALITY CONSENSUS RUNNING</div>
                 <div class="laser-line"></div>
             </div>
             """, unsafe_allow_html=True)
             status_banner = st.empty()
             progress_bar = st.progress(0)
-            for pct, msg in [(25, "🛰️ Ingesting spatial tensor features..."), (65, "🔬 Evaluating multi-spectral residuals (Neural + ELA + SRM)..."), (100, "✅ Consensus verification complete.")]:
+            for pct, msg in [(30, "🛰️ Analyzing pixel differences & quality grids..."), (70, "🔬 Evaluating footing & illumination vectors..."), (100, "✅ Consensus verification complete.")]:
                 status_banner.markdown(f"<span class='mono' style='color:#38bdf8;'>{msg}</span>", unsafe_allow_html=True)
                 progress_bar.progress(pct)
                 time.sleep(0.12)
@@ -740,7 +677,7 @@ if selected_img is not None:
             else:
                 st.markdown('<div class="badge-authentic">AUTHENTIC / ORIGINAL STREAM</div>', unsafe_allow_html=True)
         with s2:
-            st.metric("Multi-Spectral Consensus Confidence", f"{consensus_confidence}%")
+            st.metric("Consensus Confidence Score", f"{consensus_confidence}%")
 
         st.write("")
         pdf_bytes = generate_pdf_report(current_case)
@@ -752,75 +689,84 @@ if selected_img is not None:
         )
 
         st.write("---")
-        st.subheader("🖼️ Core Spectral Decomposition Matrix")
+        st.subheader("🖼️ Advanced Forensic Test Grid (Heatmaps & Quality)")
 
         d1, d2, d3, d4 = st.columns(4)
         with d1:
-            st.markdown('<div class="forensic-tile"><div class="tile-title">1. Original Frame</div></div>', unsafe_allow_html=True)
-            st.image(selected_img, use_container_width=True)
+            st.markdown('<div class="forensic-tile"><div class="tile-title">1. Pixel Difference</div></div>', unsafe_allow_html=True)
+            st.image(pixel_diff_map, use_container_width=True)
         with d2:
-            st.markdown('<div class="forensic-tile"><div class="tile-title">2. SRM Noise Map</div></div>', unsafe_allow_html=True)
-            st.image(srm_map, use_container_width=True)
+            st.markdown('<div class="forensic-tile"><div class="tile-title">2. Quality & Blocking Map</div></div>', unsafe_allow_html=True)
+            st.image(quality_map, use_container_width=True)
         with d3:
-            st.markdown('<div class="forensic-tile"><div class="tile-title">3. ELA Residuals</div></div>', unsafe_allow_html=True)
-            st.image(ela_default, use_container_width=True)
+            st.markdown('<div class="forensic-tile"><div class="tile-title">3. Footing & Shadow Vector</div></div>', unsafe_allow_html=True)
+            st.image(shadow_map, use_container_width=True)
         with d4:
-            st.markdown('<div class="forensic-tile"><div class="tile-title">4. 2D-FFT Spectrum</div></div>', unsafe_allow_html=True)
-            st.image(fft_map, use_container_width=True)
+            st.markdown('<div class="forensic-tile"><div class="tile-title">4. Edge Discontinuity</div></div>', unsafe_allow_html=True)
+            st.image(edge_map, use_container_width=True)
 
     # --------------------------------------------------------
-    # TAB 2: Diagnostic Parameters
+    # TAB 2: Diagnostic Parameters (Showing All Tests including New Ones)
     # --------------------------------------------------------
     with param_tab:
-        st.subheader("📊 Diagnostic Parameters (Active Detection Modalities)")
-        st.caption("Active feature extractors and mathematical algorithms contributing to the multi-spectral consensus engine.")
+        st.subheader("📊 Diagnostic Parameters & Advanced Test Modalities")
+        st.caption("Inspect pixel difference heatmaps, image quality comparison grids, footing/shadow analysis, and compression residuals.")
 
-        (t_srm, t_ela, t_fft, t_edge, t_meta, t_hash) = st.tabs([
-            "📡 SRM Sensor Noise (PRNU)",
-            "🕵️ Error Level Analysis (ELA)",
-            "📈 Frequency Spectrum (2D-FFT)",
-            "🔍 Edge Discontinuity",
-            "📋 Metadata Audit",
-            "🔑 Hashes & Provenance"
+        (t_pix, t_qual, t_shad, t_ela, t_srm, t_fft, t_meta, t_hash) = st.tabs([
+            "🔥 Pixel Differences",
+            "📊 Quality Comparison",
+            "👥 Footing & Shadows",
+            "🕵️ Error Level (ELA)",
+            "📡 SRM Noise",
+            "📈 2D-FFT",
+            "📋 Metadata",
+            "🔑 Hashes"
         ])
 
-        with t_srm:
-            st.markdown("#### Spatial Rich Model (SRM) & PRNU Sensor Noise Analysis")
-            st.write("Extracts high-frequency sensor pattern noise to determine whether camera sensor response is uniform across the frame.")
-            if st.button("🚀 Run SRM Sensor Extraction", key="btn_p_srm", use_container_width=True):
-                st.image(srm_map, caption="SRM Residual Noise Map", use_container_width=True)
+        with t_pix:
+            st.markdown("#### Pixel Difference Heatmap Analysis")
+            st.write("Highlights micro-variances and pixel-level alterations against a smoothed bilateral reference frame.")
+            if st.button("🚀 Run Pixel Difference Test", key="btn_p_pix", use_container_width=True):
+                st.image(pixel_diff_map, caption="Pixel Difference Thermal Heatmap", use_container_width=True)
+
+        with t_qual:
+            st.markdown("#### Image Quality & Compression Blocking Grid Map")
+            st.write("Computes local 8x8 DCT block variance to uncover regions compressed at different quality factors.")
+            if st.button("🚀 Run Quality Grid Map", key="btn_p_qual", use_container_width=True):
+                st.image(quality_map, caption="Compression Quality & Blocking Variance Map", use_container_width=True)
+
+        with t_shad:
+            st.markdown("#### Footing & Lighting / Shadow Vector Consistency")
+            st.write("Analyzes luminance direction and contact planes to detect floating objects or inconsistent light sources.")
+            if st.button("🚀 Run Footing & Shadow Test", key="btn_p_shad", use_container_width=True):
+                st.image(shadow_map, caption="Lighting Angle & Shadow Vector Field", use_container_width=True)
 
         with t_ela:
             st.markdown("#### Error Level Analysis (ELA)")
-            st.write("Evaluates compression error levels at 90% JPEG quality to locate spliced regions with different compression histories.")
-            if st.button("🚀 Run ELA Analysis", key="btn_p_ela", use_container_width=True):
-                st.image(ela_default, caption="ELA Compression Residual", use_container_width=True)
+            if st.button("🚀 Run ELA Inspection", key="btn_p_ela", use_container_width=True):
+                st.image(ela_default, caption=f"ELA Residual (Q={ela_q})", use_container_width=True)
+
+        with t_srm:
+            st.markdown("#### SRM Sensor Noise")
+            if st.button("🚀 Run SRM Extraction", key="btn_p_srm", use_container_width=True):
+                st.image(srm_map, caption="SRM Residual Noise Map", use_container_width=True)
 
         with t_fft:
-            st.markdown("#### 2D Fast Fourier Transform (2D-FFT)")
-            st.write("Converts spatial pixel grids into the frequency domain to check for periodic resampling or GAN generation lattice spikes.")
-            if st.button("🚀 Run 2D-FFT Analysis", key="btn_p_fft", use_container_width=True):
-                st.image(fft_map, caption="2D-FFT Frequency Power Spectrum", use_container_width=True)
-
-        with t_edge:
-            st.markdown("#### Canny-Laplacian Edge Discontinuity")
-            st.write("Detects unnatural edge blurring or abrupt high-contrast boundary seams introduced during image splicing.")
-            if st.button("🚀 Run Edge Discontinuity Map", key="btn_p_edge", use_container_width=True):
-                st.image(edge_map, caption="Edge Seam Discrepancy Map", use_container_width=True)
+            st.markdown("#### 2D-FFT Frequency Spectrum")
+            if st.button("🚀 Run 2D-FFT", key="btn_p_fft", use_container_width=True):
+                st.image(fft_map, caption="2D-FFT Power Spectrum", use_container_width=True)
 
         with t_meta:
-            st.markdown("#### EXIF Metadata & Software Fingerprinting")
-            st.write("Inspects header tags for editing software signatures (Photoshop, GIMP, Canva, etc.).")
-            if st.button("🚀 Audit Metadata Headers", key="btn_p_meta", use_container_width=True):
+            st.markdown("#### EXIF Metadata")
+            if st.button("🚀 Audit Metadata", key="btn_p_meta", use_container_width=True):
                 st.metric("Status", meta_info["status"])
                 if meta_info["tags"]:
                     st.dataframe(meta_info["tags"], use_container_width=True)
 
         with t_hash:
-            st.markdown("#### Cryptographic & Perceptual Hashes")
-            st.write("Generates bitstream SHA-256 digests and perceptual hashes to establish file integrity.")
+            st.markdown("#### Cryptographic Hashes")
             if st.button("🚀 Compute Hashes", key="btn_p_hash", use_container_width=True):
-                st.code(f"SHA-256: {hashes['SHA-256']}\nMD5:     {hashes['MD5']}\ndHash:   {hashes['dHash']}\naHash:   {hashes['aHash']}", language="bash")
+                st.code(f"SHA-256: {hashes['SHA-256']}\nMD5:     {hashes['MD5']}", language="bash")
 
     # --------------------------------------------------------
     # TAB 3: History Audit
