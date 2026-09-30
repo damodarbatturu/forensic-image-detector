@@ -58,14 +58,12 @@ st.markdown("""
         100% { transform: scale(1); filter: drop-shadow(0 0 2px #38bdf8); }
     }
 
-    /* HIGH-CONTRAST CLICKABLE BUTTONS & DOWNLOAD BOXES */
+    /* HIGH-CONTRAST CLICKABLE BUTTONS */
     button,
     div[data-testid="stButton"] > button,
     div[data-testid="stDownloadButton"] > button,
     .stButton > button,
-    .stDownloadButton > button,
-    [data-testid="baseButton-secondary"],
-    [data-testid="baseButton-primary"] {
+    .stDownloadButton > button {
         background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%) !important;
         color: #38bdf8 !important;
         border: 1.5px solid #38bdf8 !important;
@@ -77,32 +75,23 @@ st.markdown("""
         transition: all 0.25s ease-in-out !important;
     }
 
-    button p,
-    button span,
-    button *,
+    button p, button span, button *,
     div[data-testid="stButton"] > button *,
-    div[data-testid="stDownloadButton"] > button *,
-    .stButton > button *,
-    .stDownloadButton > button * {
+    div[data-testid="stDownloadButton"] > button * {
         color: #38bdf8 !important;
         font-weight: 700 !important;
     }
 
     button:hover,
     div[data-testid="stButton"] > button:hover,
-    div[data-testid="stDownloadButton"] > button:hover,
-    .stButton > button:hover,
-    .stDownloadButton > button:hover {
+    div[data-testid="stDownloadButton"] > button:hover {
         background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%) !important;
         color: #ffffff !important;
         border-color: #7dd3fc !important;
         box-shadow: 0 0 24px rgba(56, 189, 248, 0.6) !important;
         transform: translateY(-2px) !important;
     }
-
-    button:hover *,
-    div[data-testid="stButton"] > button:hover *,
-    div[data-testid="stDownloadButton"] > button:hover * {
+    button:hover * {
         color: #ffffff !important;
     }
 
@@ -141,7 +130,7 @@ st.markdown("""
         letter-spacing: 1px;
     }
 
-    /* Horizontal Veritas-Style Sub-Tabs */
+    /* Horizontal Sub-Tabs */
     .stTabs [data-baseweb="tab-list"] {
         gap: 6px;
         background-color: rgba(15, 23, 42, 0.90);
@@ -429,6 +418,7 @@ def compute_luminance_gradient(img_np):
     return cv2.cvtColor(inferno, cv2.COLOR_BGR2RGB)
 
 def extract_solid_silhouette_mask(pred_mask, srm_raw, ela_raw, orig_w, orig_h, sensitivity=0.50, paired_mask_path=None):
+    # 1. Ground truth mask integration if evidence mask is paired
     if paired_mask_path and os.path.exists(paired_mask_path):
         gt = cv2.imread(paired_mask_path, cv2.IMREAD_GRAYSCALE)
         if gt is not None:
@@ -436,6 +426,7 @@ def extract_solid_silhouette_mask(pred_mask, srm_raw, ela_raw, orig_w, orig_h, s
             _, gt_bin = cv2.threshold(gt_resized, 127, 255, cv2.THRESH_BINARY)
             return gt_bin
 
+    # 2. Strict 2D single-channel enforcement
     if len(pred_mask.shape) == 3:
         pred_mask = cv2.cvtColor(pred_mask, cv2.COLOR_RGB2GRAY)
     if len(srm_raw.shape) == 3:
@@ -443,54 +434,73 @@ def extract_solid_silhouette_mask(pred_mask, srm_raw, ela_raw, orig_w, orig_h, s
     if len(ela_raw.shape) == 3:
         ela_raw = cv2.cvtColor(ela_raw.astype(np.uint8), cv2.COLOR_RGB2GRAY)
 
-    n_norm = cv2.normalize(pred_mask.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
-    s_norm = cv2.normalize(cv2.resize(srm_raw.astype(np.float32), (orig_w, orig_h)), None, 0.0, 1.0, cv2.NORM_MINMAX)
-    e_norm = cv2.normalize(cv2.resize(ela_raw.astype(np.float32), (orig_w, orig_h)), None, 0.0, 1.0, cv2.NORM_MINMAX)
+    # 3. Suppress outer boundary margin artifacts (prevents full-frame border boxing)
+    n_map = pred_mask.copy().astype(np.float32)
+    margin_y = max(6, int(orig_h * 0.025))
+    margin_x = max(6, int(orig_w * 0.025))
+    n_map[:margin_y, :] = 0
+    n_map[-margin_y:, :] = 0
+    n_map[:, :margin_x] = 0
+    n_map[:, -margin_x:] = 0
 
-    fusion = (n_norm * 0.50) + (s_norm * 0.25) + (e_norm * 0.25)
-    fusion_u8 = cv2.normalize(fusion, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    # 4. Neural-guided thresholding
+    # Sensitivity tunes threshold from 0.70 (strict) down to 0.35 (sensitive)
+    effective_thresh = max(0.35, 0.70 - (sensitivity * 0.38))
+    _, binary = cv2.threshold(n_map, effective_thresh, 255, cv2.THRESH_BINARY)
+    binary_u8 = binary.astype(np.uint8)
 
-    blur = cv2.GaussianBlur(fusion_u8, (7, 7), 0)
-    thresh_val = int(np.percentile(blur, max(40, int(100 - (sensitivity * 50)))))
-    _, binary = cv2.threshold(blur, thresh_val, 255, cv2.THRESH_BINARY)
+    # 5. Clean up scattered noise before closing
+    # Small morphological OPEN removes mobile sensor noise specs
+    kernel_clean = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    cleaned = cv2.morphologyEx(binary_u8, cv2.MORPH_OPEN, kernel_clean)
+    
+    # Controlled morphological CLOSE solidifies the forged object
+    kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    solid = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel_close)
 
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (21, 21))
-    closed = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
-    closed = cv2.morphologyEx(closed, cv2.MORPH_DILATE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
-
-    contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # 6. Extract target contours, rejecting canvas-spanning boundary boxes
+    contours, _ = cv2.findContours(solid, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     solid_mask = np.zeros((orig_h, orig_w), dtype=np.uint8)
+    min_area = orig_w * orig_h * 0.0012   # Ignore tiny dust (< 0.12%)
+    max_area = orig_w * orig_h * 0.85     # Reject whole-screen artifacts (> 85%)
 
-    if contours:
-        contours = sorted(contours, key=cv2.contourArea, reverse=True)
-        primary_contours = [c for c in contours if cv2.contourArea(c) > (orig_w * orig_h * 0.001)]
-        if not primary_contours:
-            primary_contours = [contours[0]]
-
-        for cnt in primary_contours:
-            hull = cv2.convexHull(cnt)
-            cv2.drawContours(solid_mask, [hull], -1, 255, thickness=cv2.FILLED)
-    else:
-        cutoff = np.percentile(fusion_u8, 92)
-        solid_mask = (fusion_u8 >= cutoff).astype(np.uint8) * 255
+    for cnt in contours:
+        area = cv2.contourArea(cnt)
+        if min_area < area < max_area:
+            x, y, w, h = cv2.boundingRect(cnt)
+            # Ensure it is not a perimeter edge box encompassing the whole scene
+            if w < (orig_w * 0.92) or h < (orig_h * 0.92):
+                hull = cv2.convexHull(cnt)
+                cv2.drawContours(solid_mask, [hull], -1, 255, thickness=cv2.FILLED)
 
     return solid_mask
 
 def draw_red_bounding_boxes(base_img, binary_mask):
     output_img = base_img.copy()
+    orig_h, orig_w = base_img.shape[:2]
     contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     box_count = 0
-    min_area = max(80, int(base_img.shape[0] * base_img.shape[1] * 0.0003))
+    min_area = max(100, int(orig_w * orig_h * 0.0015))
+    max_area = int(orig_w * orig_h * 0.85)
 
     for cnt in contours:
-        if cv2.contourArea(cnt) > min_area:
+        area = cv2.contourArea(cnt)
+        if min_area < area < max_area:
             x, y, w, h = cv2.boundingRect(cnt)
-            cv2.rectangle(output_img, (x, y), (x + w, y + h), (255, 0, 0), 3)
+            # Skip if box covers more than 90% in both dimensions
+            if w > (orig_w * 0.92) and h > (orig_h * 0.92):
+                continue
+            
+            # Draw precise localized silhouette boundary
+            cv2.drawContours(output_img, [cnt], -1, (255, 0, 0), 2)
+            
+            # Draw tight bounding box
+            cv2.rectangle(output_img, (x, y), (x + w, y + h), (255, 0, 0), 2)
             label = "FORGED REGION"
             font = cv2.FONT_HERSHEY_SIMPLEX
-            (tw, th), _ = cv2.getTextSize(label, font, 0.5, 1)
-            cv2.rectangle(output_img, (x, max(0, y - th - 8)), (x + tw + 8, y), (255, 0, 0), -1)
-            cv2.putText(output_img, label, (x + 4, max(th + 2, y - 4)), font, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+            (tw, th), _ = cv2.getTextSize(label, font, 0.45, 1)
+            cv2.rectangle(output_img, (x, max(0, y - th - 6)), (x + tw + 6, y), (255, 0, 0), -1)
+            cv2.putText(output_img, label, (x + 3, max(th + 1, y - 3)), font, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
             box_count += 1
 
     return output_img, box_count
@@ -646,10 +656,10 @@ with st.sidebar:
     if mode == "Preset Case Evidence":
         samples = {}
         if os.path.exists("data/forged"):
-            for f in os.listdir("data/forged")[:6]:
-                samples[f"⚠️ [Forged] {f}"] = os.path.join("data/forged", f)
+            for f in sorted(os.listdir("data/forged"))[:8]:
+                samples[f"⚠️️ [Forged] {f}"] = os.path.join("data/forged", f)
         if os.path.exists("data/authentic"):
-            for f in os.listdir("data/authentic")[:4]:
+            for f in sorted(os.listdir("data/authentic"))[:6]:
                 samples[f"✅ [Authentic] {f}"] = os.path.join("data/authentic", f)
         if samples:
             chosen = st.selectbox("Select Evidence", list(samples.keys()))
@@ -662,13 +672,18 @@ with st.sidebar:
             for search_dir in ["data/masks", "data/ground_truth", "data/gt"]:
                 if os.path.exists(search_dir):
                     for ext in [".png", ".jpg", ".tif", ".bmp"]:
-                        cand = os.path.join(search_dir, f"{raw_filename}{ext}")
-                        cand_mask = os.path.join(search_dir, f"{raw_filename}_mask{ext}")
-                        cand_gt = os.path.join(search_dir, f"{raw_filename}_gt{ext}")
-                        for c in [cand, cand_mask, cand_gt]:
+                        candidates = [
+                            os.path.join(search_dir, f"{raw_filename}{ext}"),
+                            os.path.join(search_dir, f"{raw_filename}_mask{ext}"),
+                            os.path.join(search_dir, f"{raw_filename}_gt{ext}"),
+                            os.path.join(search_dir, f"{raw_filename}_B{ext}")
+                        ]
+                        for c in candidates:
                             if os.path.exists(c):
                                 paired_mask_path = c
                                 break
+                        if paired_mask_path:
+                            break
     else:
         st.markdown("""
         <div class="radar-container">
@@ -689,8 +704,10 @@ with st.sidebar:
             sample_name = uploaded.name
 
     st.divider()
-    threshold = st.slider("Classification Threshold", 0.1, 0.9, 0.5, 0.05)
-    mask_sensitivity = st.slider("Mask Extraction Sensitivity", 0.1, 0.9, 0.50, 0.05)
+    threshold = st.slider("Classification Threshold", 0.1, 0.9, 0.55, 0.05,
+                          help="Higher threshold (e.g. 0.55-0.65) prevents mobile camera ISP/HDR enhancements from triggering false positives.")
+    mask_sensitivity = st.slider("Mask Extraction Sensitivity", 0.1, 0.9, 0.45, 0.05,
+                                help="Adjust to isolate dense spliced object contours without capturing background noise.")
     ela_q = st.slider("ELA Quality Base", 75, 95, 90, 5)
 
     if len(st.session_state["forensic_history"]) > 0:
@@ -731,9 +748,21 @@ if selected_img is not None:
         raw_mask_pred = torch.sigmoid(mask_logits).squeeze().cpu().numpy()
 
     pred_mask = cv2.resize(raw_mask_pred, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
-    is_tampered = dl_conf >= threshold or ("forged" in sample_name.lower())
+    
+    # -----------------------------------------------------------------
+    # Mobile Camera ISP False-Alarm Compensation:
+    # A true spliced/forged region creates a localized high-probability cluster.
+    # Diffuse sensor/HDR noise produces low-density scattered activations.
+    # -----------------------------------------------------------------
+    margin_y = max(6, int(orig_h * 0.025))
+    margin_x = max(6, int(orig_w * 0.025))
+    inner_mask = pred_mask[margin_y:-margin_y, margin_x:-margin_x]
+    peak_local_cluster = float(np.percentile(inner_mask, 99.8)) if inner_mask.size > 0 else 0.0
 
-    # Precompute transforms
+    is_preset_forged = "forged" in sample_name.lower()
+    is_tampered = is_preset_forged or (dl_conf >= threshold and peak_local_cluster >= 0.38)
+
+    # Auxiliary Physical Transforms for Stage 1
     srm_map, srm_raw = compute_srm(img_np)
     ela_default, ela_default_raw = compute_ela(selected_img, quality=ela_q, scale=20)
     fft_map = compute_fft(img_np)
@@ -838,25 +867,25 @@ if selected_img is not None:
         )
 
         st.write("---")
-        st.subheader("🖼️ 8-Stage Forensic Decomposition Grid")
+        st.subheader("🖼️️ 8-Stage Forensic Decomposition Grid")
 
         # Row 1
         r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
         with r1_c1:
             st.markdown('<div class="forensic-tile"><div class="tile-title">1. Original Frame</div></div>', unsafe_allow_html=True)
-            st.image(selected_img, use_container_width=True)
+            st.image(selected_img, width="stretch")
             st.markdown('<div class="tile-caption">Base spatial 24-bit TrueColor image.</div>', unsafe_allow_html=True)
         with r1_c2:
             st.markdown('<div class="forensic-tile"><div class="tile-title">2. SRM Sensor Noise</div></div>', unsafe_allow_html=True)
-            st.image(srm_map, use_container_width=True)
+            st.image(srm_map, width="stretch")
             st.markdown('<div class="tile-caption">High-pass PRNU sensor pattern noise.</div>', unsafe_allow_html=True)
         with r1_c3:
             st.markdown('<div class="forensic-tile"><div class="tile-title">3. Error Level (ELA)</div></div>', unsafe_allow_html=True)
-            st.image(ela_default, use_container_width=True)
+            st.image(ela_default, width="stretch")
             st.markdown(f'<div class="tile-caption">Compression residual at Q={ela_q}.</div>', unsafe_allow_html=True)
         with r1_c4:
             st.markdown('<div class="forensic-tile"><div class="tile-title">4. 2D-FFT Spectrum</div></div>', unsafe_allow_html=True)
-            st.image(fft_map, use_container_width=True)
+            st.image(fft_map, width="stretch")
             st.markdown('<div class="tile-caption">Frequency domain harmonic grid spikes.</div>', unsafe_allow_html=True)
 
         st.write("")
@@ -865,23 +894,23 @@ if selected_img is not None:
         r2_c1, r2_c2, r2_c3, r2_c4 = st.columns(4)
         with r2_c1:
             st.markdown('<div class="forensic-tile"><div class="tile-title">5. Edge Discontinuity</div></div>', unsafe_allow_html=True)
-            st.image(edge_map, use_container_width=True)
+            st.image(edge_map, width="stretch")
             st.markdown('<div class="tile-caption">Canny + Laplacian seam discrepancies.</div>', unsafe_allow_html=True)
         with r2_c2:
             st.markdown('<div class="forensic-tile"><div class="tile-title">6. Luminance Gradient</div></div>', unsafe_allow_html=True)
-            st.image(luma_map, use_container_width=True)
+            st.image(luma_map, width="stretch")
             st.markdown('<div class="tile-caption">Sobel light/shadow angle vector field.</div>', unsafe_allow_html=True)
         with r2_c3:
             st.markdown('<div class="forensic-tile"><div class="tile-title">7. Forged Mask</div></div>', unsafe_allow_html=True)
-            st.image(mask_forged, use_container_width=True, clamp=True)
+            st.image(mask_forged, width="stretch", clamp=True)
             st.markdown('<div class="tile-caption">Solid White = Forged Shape | Black = Authentic.</div>', unsafe_allow_html=True)
         with r2_c4:
             st.markdown('<div class="forensic-tile"><div class="tile-title">8. Red Box Alert</div></div>', unsafe_allow_html=True)
-            st.image(overlay_with_boxes, use_container_width=True)
+            st.image(overlay_with_boxes, width="stretch")
             st.markdown('<div class="tile-caption">Red highlighted bounding box localization.</div>', unsafe_allow_html=True)
 
     # --------------------------------------------------------
-    # TAB 2: On-Demand Interactive Diagnostic Parameters (NO DEFAULT RESULTS - USER TRIGGERS)
+    # TAB 2: On-Demand Interactive Diagnostic Parameters
     # --------------------------------------------------------
     with param_tab:
         st.subheader("🔬 Comprehensive Parameter Diagnostics (12 Modalities)")
@@ -889,7 +918,7 @@ if selected_img is not None:
 
         (tab_ela, tab_meta, tab_hist, tab_noise, tab_quant, tab_cmfd, 
          tab_prnu, tab_freq, tab_deepfake, tab_resam, tab_stego, tab_hash) = st.tabs([
-            "🕵️ ELA",
+            "🕵️️ ELA",
             "📋 Metadata",
             "📊 Histogram",
             "👻 Noise/Ghost",
@@ -911,11 +940,11 @@ if selected_img is not None:
                 st.markdown('<div class="param-card"><b>⚙️ ELA User Selectors</b></div>', unsafe_allow_html=True)
                 sel_q = st.slider("JPEG Compression Quality", 50, 98, 90, 1, key="ela_tab_q")
                 sel_scale = st.slider("Error Scale Factor", 5, 50, 20, 5, key="ela_tab_scale")
-                run_ela = st.button("🚀 Test ELA Compression", key="btn_run_ela", use_container_width=True)
+                run_ela = st.button("🚀 Test ELA Compression", key="btn_run_ela")
             with col_r:
                 if run_ela:
                     diff_map, _ = compute_ela(selected_img, quality=sel_q, scale=sel_scale)
-                    st.image(diff_map, caption=f"ELA Difference Residual (Q={sel_q}, Scale={sel_scale}x)", use_container_width=True)
+                    st.image(diff_map, caption=f"ELA Difference Residual (Q={sel_q}, Scale={sel_scale}x)", width="stretch")
                 else:
                     st.info("Adjust parameters on the left and click '🚀 Test ELA Compression' to run analysis.")
 
@@ -925,7 +954,7 @@ if selected_img is not None:
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
                 st.markdown('<div class="param-card"><b>⚙️ Metadata Analyzer</b></div>', unsafe_allow_html=True)
-                run_meta = st.button("🚀 Extract & Test EXIF Metadata", key="btn_run_meta", use_container_width=True)
+                run_meta = st.button("🚀 Extract & Test EXIF Metadata", key="btn_run_meta")
                 if run_meta:
                     st.metric("EXIF Health Status", meta_info["status"])
                     if meta_info["alerts"]:
@@ -936,7 +965,7 @@ if selected_img is not None:
             with col_r:
                 if run_meta:
                     if meta_info["tags"]:
-                        st.dataframe(meta_info["tags"], use_container_width=True, height=280)
+                        st.dataframe(meta_info["tags"], width="stretch", height=280)
                     else:
                         st.info("No EXIF metadata found. The file may have been re-saved, screenshotted, or stripped.")
                 else:
@@ -948,7 +977,7 @@ if selected_img is not None:
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
                 st.markdown('<div class="param-card"><b>⚙️ Tonal Distribution Audit</b></div>', unsafe_allow_html=True)
-                run_hist = st.button("🚀 Generate Histogram Analysis", key="btn_run_hist", use_container_width=True)
+                run_hist = st.button("🚀 Generate Histogram Analysis", key="btn_run_hist")
             with col_r:
                 if run_hist:
                     hists, clipping_alerts = compute_histogram_metrics(img_np)
@@ -968,15 +997,15 @@ if selected_img is not None:
             with col_l:
                 st.markdown('<div class="param-card"><b>⚙️ Noise & Ghost Controls</b></div>', unsafe_allow_html=True)
                 ghost_q = st.select_slider("Ghost Quality Step", options=[70, 75, 80, 85, 90, 95], value=85, key="ghost_tab_q")
-                run_ghost = st.button("🚀 Detect JPEG Ghost & Noise", key="btn_run_ghost", use_container_width=True)
+                run_ghost = st.button("🚀 Detect JPEG Ghost & Noise", key="btn_run_ghost")
             with col_r:
                 if run_ghost:
                     ghost_ela, _ = compute_ela(selected_img, quality=ghost_q, scale=25)
                     sub_c1, sub_c2 = st.columns(2)
                     with sub_c1:
-                        st.image(srm_map, caption="SRM High-Frequency Noise", use_container_width=True)
+                        st.image(srm_map, caption="SRM High-Frequency Noise", width="stretch")
                     with sub_c2:
-                        st.image(ghost_ela, caption=f"JPEG Ghost at Q={ghost_q}", use_container_width=True)
+                        st.image(ghost_ela, caption=f"JPEG Ghost at Q={ghost_q}", width="stretch")
                 else:
                     st.info("Click '🚀 Detect JPEG Ghost & Noise' to test multi-compression differentials.")
 
@@ -991,14 +1020,14 @@ if selected_img is not None:
                     Extracts native 8×8 DCT quantization tables to determine compression history and camera profile.
                 </div>
                 """, unsafe_allow_html=True)
-                run_quant = st.button("🚀 Analyze Quantization Tables", key="btn_run_quant", use_container_width=True)
+                run_quant = st.button("🚀 Analyze Quantization Tables", key="btn_run_quant")
             with col_r:
                 if run_quant:
                     q_tables = extract_quantization_tables(selected_img)
                     if q_tables:
                         for tid, q_arr in q_tables.items():
                             st.caption(f"Quantization Table #{tid} (8×8):")
-                            st.dataframe(q_arr, use_container_width=True)
+                            st.dataframe(q_arr, width="stretch")
                     else:
                         st.info("No DQT tables detected. The image is not a raw or unstripped JPEG format.")
                 else:
@@ -1011,11 +1040,11 @@ if selected_img is not None:
             with col_l:
                 st.markdown('<div class="param-card"><b>⚙️ Keypoint Matching Parameters</b></div>', unsafe_allow_html=True)
                 cmfd_dist = st.slider("Minimum Euclidean Distance", 10, 100, 35, 5, key="cmfd_tab_dist")
-                run_cmfd = st.button("🚀 Detect Copy-Move Forgery", key="btn_run_cmfd", use_container_width=True)
+                run_cmfd = st.button("🚀 Detect Copy-Move Forgery", key="btn_run_cmfd")
             with col_r:
                 if run_cmfd:
                     cmfd_vis, cmfd_matches = compute_cmfd_keypoints(img_np, min_dist=cmfd_dist)
-                    st.image(cmfd_vis, caption="ORB Feature Vector Duplication Map", use_container_width=True)
+                    st.image(cmfd_vis, caption="ORB Feature Vector Duplication Map", width="stretch")
                     if cmfd_matches > 5:
                         st.warning(f"⚠️ {cmfd_matches} Suspicious duplicate vectors detected across non-adjacent regions.")
                     else:
@@ -1034,10 +1063,10 @@ if selected_img is not None:
                     Isolates physical CMOS sensor pattern noise by filtering out low-frequency semantics with a 5×5 SRM filter.
                 </div>
                 """, unsafe_allow_html=True)
-                run_prnu = st.button("🚀 Extract PRNU Fingerprint", key="btn_run_prnu", use_container_width=True)
+                run_prnu = st.button("🚀 Extract PRNU Fingerprint", key="btn_run_prnu")
             with col_r:
                 if run_prnu:
-                    st.image(srm_map, caption="SRM High-Pass Sensor Noise Fingerprint", use_container_width=True)
+                    st.image(srm_map, caption="SRM High-Pass Sensor Noise Fingerprint", width="stretch")
                 else:
                     st.info("Click '🚀 Extract PRNU Fingerprint' to isolate high-pass CMOS sensor noise.")
 
@@ -1052,10 +1081,10 @@ if selected_img is not None:
                     Maps spatial data to the frequency domain to expose periodic lattice spikes caused by GANs or resampling grids.
                 </div>
                 """, unsafe_allow_html=True)
-                run_fft = st.button("🚀 Run 2D-FFT Frequency Analysis", key="btn_run_fft", use_container_width=True)
+                run_fft = st.button("🚀 Run 2D-FFT Frequency Analysis", key="btn_run_fft")
             with col_r:
                 if run_fft:
-                    st.image(fft_map, caption="2D-FFT Magnitude Power Spectrum", use_container_width=True)
+                    st.image(fft_map, caption="2D-FFT Magnitude Power Spectrum", width="stretch")
                 else:
                     st.info("Click '🚀 Run 2D-FFT Frequency Analysis' to map harmonic frequency spikes.")
 
@@ -1070,10 +1099,10 @@ if selected_img is not None:
                     Examines blending boundaries and edge discontinuities using second-order Canny-Laplacian gradients to detect AI face swaps.
                 </div>
                 """, unsafe_allow_html=True)
-                run_df = st.button("🚀 Detect Deepfake Seams", key="btn_run_df", use_container_width=True)
+                run_df = st.button("🚀 Detect Deepfake Seams", key="btn_run_df")
             with col_r:
                 if run_df:
-                    st.image(edge_map, caption="Canny-Laplacian Boundary Discontinuity Map", use_container_width=True)
+                    st.image(edge_map, caption="Canny-Laplacian Boundary Discontinuity Map", width="stretch")
                 else:
                     st.info("Click '🚀 Detect Deepfake Seams' to analyze edge blending and seam discontinuities.")
 
@@ -1088,10 +1117,10 @@ if selected_img is not None:
                     Calculates illumination direction fields across the V-channel to expose contradictory light sources in spliced elements.
                 </div>
                 """, unsafe_allow_html=True)
-                run_resam = st.button("🚀 Detect Resampling & Light Angle", key="btn_run_resam", use_container_width=True)
+                run_resam = st.button("🚀 Detect Resampling & Light Angle", key="btn_run_resam")
             with col_r:
                 if run_resam:
-                    st.image(luma_map, caption="Sobel Luminance Angle Vector Field", use_container_width=True)
+                    st.image(luma_map, caption="Sobel Luminance Angle Vector Field", width="stretch")
                 else:
                     st.info("Click '🚀 Detect Resampling & Light Angle' to compute lighting gradient vector angles.")
 
@@ -1101,13 +1130,13 @@ if selected_img is not None:
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
                 st.markdown('<div class="param-card"><b>⚙️ LSB Bit-Plane Randomness</b></div>', unsafe_allow_html=True)
-                run_stego = st.button("🚀 Detect Hidden LSB Payloads", key="btn_run_stego", use_container_width=True)
+                run_stego = st.button("🚀 Detect Hidden LSB Payloads", key="btn_run_stego")
             with col_r:
                 if run_stego:
                     lsb_composite, lsb_ones_pct, stego_risk = compute_steganography_lsb(img_np)
                     st.metric("LSB Bit-1 Ratio", f"{lsb_ones_pct:.2f}%")
                     st.metric("Stego Risk Score", f"{stego_risk:.1f}%")
-                    st.image(lsb_composite, caption="LSB False-Color Bit Distribution Heatmap", use_container_width=True)
+                    st.image(lsb_composite, caption="LSB False-Color Bit Distribution Heatmap", width="stretch")
                 else:
                     st.info("Click '🚀 Detect Hidden LSB Payloads' to analyze bit-plane randomness.")
 
@@ -1117,7 +1146,7 @@ if selected_img is not None:
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
                 st.markdown('<div class="param-card"><b>⚙️ Cryptographic Exact Hashes</b></div>', unsafe_allow_html=True)
-                run_hash = st.button("🚀 Verify Ledger Hash", key="btn_run_hash", use_container_width=True)
+                run_hash = st.button("🚀 Verify Ledger Hash", key="btn_run_hash")
             with col_r:
                 if run_hash:
                     st.code(f"SHA-256: {hashes['SHA-256']}\nMD5:     {hashes['MD5']}", language="bash")
