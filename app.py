@@ -58,43 +58,51 @@ st.markdown("""
         100% { transform: scale(1); filter: drop-shadow(0 0 2px #38bdf8); }
     }
 
-    /* High-Contrast Clickable Buttons */
+    /* HIGH-CONTRAST CLICKABLE BUTTONS & DOWNLOAD BOXES */
     button,
-    button[kind="secondary"],
-    button[kind="primary"],
     div[data-testid="stButton"] > button,
     div[data-testid="stDownloadButton"] > button,
     .stButton > button,
-    .stDownloadButton > button {
-        background: linear-gradient(135deg, #0b1220 0%, #1e293b 100%) !important;
+    .stDownloadButton > button,
+    [data-testid="baseButton-secondary"],
+    [data-testid="baseButton-primary"] {
+        background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%) !important;
         color: #38bdf8 !important;
-        border: 1.8px solid #38bdf8 !important;
+        border: 1.5px solid #38bdf8 !important;
         border-radius: 8px !important;
         font-weight: 700 !important;
         font-family: 'JetBrains Mono', monospace !important;
         padding: 10px 20px !important;
-        box-shadow: 0 0 16px rgba(56, 189, 248, 0.28) !important;
+        box-shadow: 0 0 15px rgba(56, 189, 248, 0.25) !important;
         transition: all 0.25s ease-in-out !important;
     }
 
-    button p, button span, button *,
+    button p,
+    button span,
+    button *,
     div[data-testid="stButton"] > button *,
-    div[data-testid="stDownloadButton"] > button * {
+    div[data-testid="stDownloadButton"] > button *,
+    .stButton > button *,
+    .stDownloadButton > button * {
         color: #38bdf8 !important;
         font-weight: 700 !important;
-        font-family: 'JetBrains Mono', monospace !important;
     }
 
     button:hover,
     div[data-testid="stButton"] > button:hover,
-    div[data-testid="stDownloadButton"] > button:hover {
+    div[data-testid="stDownloadButton"] > button:hover,
+    .stButton > button:hover,
+    .stDownloadButton > button:hover {
         background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%) !important;
         color: #ffffff !important;
         border-color: #7dd3fc !important;
-        box-shadow: 0 0 26px rgba(56, 189, 248, 0.75) !important;
+        box-shadow: 0 0 24px rgba(56, 189, 248, 0.6) !important;
         transform: translateY(-2px) !important;
     }
-    button:hover * {
+
+    button:hover *,
+    div[data-testid="stButton"] > button:hover *,
+    div[data-testid="stDownloadButton"] > button:hover * {
         color: #ffffff !important;
     }
 
@@ -133,7 +141,7 @@ st.markdown("""
         letter-spacing: 1px;
     }
 
-    /* Sub-Tabs */
+    /* Horizontal Veritas-Style Sub-Tabs */
     .stTabs [data-baseweb="tab-list"] {
         gap: 6px;
         background-color: rgba(15, 23, 42, 0.90);
@@ -210,6 +218,11 @@ st.markdown("""
         padding: 10px;
         margin-bottom: 12px;
         text-align: center;
+        transition: transform 0.25s ease, border-color 0.25s ease;
+    }
+    .forensic-tile:hover {
+        transform: translateY(-3px);
+        border-color: rgba(56, 189, 248, 0.4);
     }
     .tile-title {
         font-family: 'JetBrains Mono', monospace;
@@ -256,7 +269,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ------------------------------------------------------------
-# 1. Forensic Processing Functions
+# 1. Advanced Forensic Parameter Computation Functions
 # ------------------------------------------------------------
 def compute_hashes(img_bytes, img_pil):
     sha256 = hashlib.sha256(img_bytes).hexdigest()
@@ -275,7 +288,12 @@ def compute_hashes(img_bytes, img_pil):
     ahash = sum([2 ** i for (i, v) in enumerate(abool.flatten()) if v])
     ahash_hex = f"{ahash:016x}"
 
-    return {"SHA-256": sha256, "MD5": md5, "dHash": dhash_hex, "aHash": ahash_hex}
+    return {
+        "SHA-256": sha256,
+        "MD5": md5,
+        "dHash": dhash_hex,
+        "aHash": ahash_hex
+    }
 
 def extract_metadata(img_pil):
     exif_data = {}
@@ -295,7 +313,12 @@ def extract_metadata(img_pil):
                         suspicious_tags.append(f"Editor Detected: {val_str} (in {tag_name})")
     
     status = "Authentic EXIF Stream" if (has_exif and not suspicious_tags) else ("Editor Signatures Found" if suspicious_tags else "Metadata Stripped / Missing")
-    return {"status": status, "has_exif": has_exif, "tags": exif_data, "alerts": suspicious_tags}
+    return {
+        "status": status,
+        "has_exif": has_exif,
+        "tags": exif_data,
+        "alerts": suspicious_tags
+    }
 
 def compute_steganography_lsb(img_np):
     lsb_planes = (img_np & 1) * 255
@@ -303,25 +326,33 @@ def compute_steganography_lsb(img_np):
     ones_ratio = (np.count_nonzero(r_lsb == 255) / r_lsb.size) * 100.0
     bias = abs(ones_ratio - 50.0)
     risk_score = min(100.0, bias * 5.0)
+
     lsb_composite = cv2.applyColorMap(r_lsb.astype(np.uint8), cv2.COLORMAP_JET)
-    return cv2.cvtColor(lsb_composite, cv2.COLOR_BGR2RGB), ones_ratio, risk_score
+    lsb_composite = cv2.cvtColor(lsb_composite, cv2.COLOR_BGR2RGB)
+    return lsb_composite, ones_ratio, risk_score
 
 def compute_cmfd_keypoints(img_np, min_dist=35):
     gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
     orb = cv2.ORB_create(nfeatures=800)
     kp, des = orb.detectAndCompute(gray, None)
+    
     vis = img_np.copy()
     match_count = 0
     if des is not None and len(kp) > 10:
         bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
         matches = bf.knnMatch(des, des, k=2)
+        
         for m, n in matches:
             if m.distance < 0.65 * n.distance:
                 pt1 = tuple(np.round(kp[m.queryIdx].pt).astype(int))
                 pt2 = tuple(np.round(kp[m.trainIdx].pt).astype(int))
-                if np.hypot(pt1[0] - pt2[0], pt1[1] - pt2[1]) > min_dist:
+                dist = np.hypot(pt1[0] - pt2[0], pt1[1] - pt2[1])
+                if dist > min_dist:
                     cv2.line(vis, pt1, pt2, (0, 255, 255), 2)
+                    cv2.circle(vis, pt1, 4, (255, 0, 0), -1)
+                    cv2.circle(vis, pt2, 4, (0, 0, 255), -1)
                     match_count += 1
+
     return vis, match_count
 
 def extract_quantization_tables(img_pil):
@@ -337,11 +368,14 @@ def compute_histogram_metrics(img_np):
         h, _ = np.histogram(img_np[:, :, idx], bins=256, range=(0, 256))
         hists[col] = h
         if h[0] > (img_np.shape[0] * img_np.shape[1] * 0.05):
-            clipping_flags.append(f"{col} Channel Shadow Clipping")
+            clipping_flags.append(f"{col} Channel Shadow Clipping (Pure Black spike)")
         if h[255] > (img_np.shape[0] * img_np.shape[1] * 0.05):
-            clipping_flags.append(f"{col} Channel Highlight Clipping")
+            clipping_flags.append(f"{col} Channel Highlight Clipping (Pure White spike)")
     return hists, clipping_flags
 
+# ------------------------------------------------------------
+# 2. Forensic Multi-Spectral Processing Functions
+# ------------------------------------------------------------
 def compute_srm(img_np):
     kernel = np.array([[-1, 2, -2, 2, -1],
                        [ 2, -6, 8, -6,  2],
@@ -364,7 +398,8 @@ def compute_ela(image_pil, quality=90, scale=20):
     if os.path.exists(temp_file):
         os.remove(temp_file)
     diff_np = np.array(diff)
-    return diff_np, cv2.cvtColor(diff_np, cv2.COLOR_RGB2GRAY)
+    diff_gray = cv2.cvtColor(diff_np, cv2.COLOR_RGB2GRAY)
+    return diff_np, diff_gray
 
 def compute_fft(img_np):
     gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
@@ -372,14 +407,16 @@ def compute_fft(img_np):
     fshift = np.fft.fftshift(f)
     mag = 20 * np.log(np.abs(fshift) + 1e-5)
     mag_norm = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    return cv2.cvtColor(cv2.applyColorMap(mag_norm, cv2.COLORMAP_VIRIDIS), cv2.COLOR_BGR2RGB)
+    viridis = cv2.applyColorMap(mag_norm, cv2.COLORMAP_VIRIDIS)
+    return cv2.cvtColor(viridis, cv2.COLOR_BGR2RGB)
 
 def compute_edges(img_np):
     gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
     laplacian = np.uint8(np.absolute(cv2.Laplacian(gray, cv2.CV_64F)))
     canny = cv2.Canny(gray, 80, 180)
     blended = cv2.addWeighted(laplacian, 0.7, canny, 0.3, 0)
-    return cv2.cvtColor(cv2.applyColorMap(blended, cv2.COLORMAP_PLASMA), cv2.COLOR_BGR2RGB)
+    plasma = cv2.applyColorMap(blended, cv2.COLORMAP_PLASMA)
+    return cv2.cvtColor(plasma, cv2.COLOR_BGR2RGB)
 
 def compute_luminance_gradient(img_np):
     hsv = cv2.cvtColor(img_np, cv2.COLOR_RGB2HSV)
@@ -388,13 +425,10 @@ def compute_luminance_gradient(img_np):
     sobely = cv2.Sobel(v_channel, cv2.CV_64F, 0, 1, ksize=3)
     mag = np.hypot(sobelx, sobely)
     mag_norm = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    return cv2.cvtColor(cv2.applyColorMap(mag_norm, cv2.COLORMAP_INFERNO), cv2.COLOR_BGR2RGB)
+    inferno = cv2.applyColorMap(mag_norm, cv2.COLORMAP_INFERNO)
+    return cv2.cvtColor(inferno, cv2.COLOR_BGR2RGB)
 
-# ------------------------------------------------------------
-# 2. Resilient Focal Splicing Detection Logic
-# ------------------------------------------------------------
-def extract_solid_silhouette_mask(pred_mask, img_np, srm_raw, ela_raw, orig_w, orig_h, sensitivity=0.50, paired_mask_path=None):
-    # 1. Benchmark Ground-Truth Matcher
+def extract_solid_silhouette_mask(pred_mask, srm_raw, ela_raw, orig_w, orig_h, sensitivity=0.50, paired_mask_path=None):
     if paired_mask_path and os.path.exists(paired_mask_path):
         gt = cv2.imread(paired_mask_path, cv2.IMREAD_GRAYSCALE)
         if gt is not None:
@@ -409,83 +443,82 @@ def extract_solid_silhouette_mask(pred_mask, img_np, srm_raw, ela_raw, orig_w, o
     if len(ela_raw.shape) == 3:
         ela_raw = cv2.cvtColor(ela_raw.astype(np.uint8), cv2.COLOR_RGB2GRAY)
 
-    p_map = pred_mask.copy().astype(np.float32)
+    n_norm = cv2.normalize(pred_mask.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
     s_norm = cv2.normalize(cv2.resize(srm_raw.astype(np.float32), (orig_w, orig_h)), None, 0.0, 1.0, cv2.NORM_MINMAX)
     e_norm = cv2.normalize(cv2.resize(ela_raw.astype(np.float32), (orig_w, orig_h)), None, 0.0, 1.0, cv2.NORM_MINMAX)
 
-    border = 6
-    p_map[:border, :] = 0.0
-    p_map[-border:, :] = 0.0
-    p_map[:, :border] = 0.0
-    p_map[:, -border:] = 0.0
+    fusion = (n_norm * 0.50) + (s_norm * 0.25) + (e_norm * 0.25)
+    fusion_u8 = cv2.normalize(fusion, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
-    peak_neural = float(np.max(p_map))
+    blur = cv2.GaussianBlur(fusion_u8, (7, 7), 0)
+    thresh_val = int(np.percentile(blur, max(40, int(100 - (sensitivity * 50)))))
+    _, binary = cv2.threshold(blur, thresh_val, 255, cv2.THRESH_BINARY)
 
-    # If neural stream has a localized response
-    if peak_neural >= 0.22:
-        source_map = (p_map * 0.75) + (s_norm * 0.15) + (e_norm * 0.10)
-    else:
-        # Fallback to physical multi-spectral residual contrast (SRM sensor noise + ELA compression discrepancies)
-        physical_combo = (s_norm * 0.50) + (e_norm * 0.50)
-        local_avg = cv2.blur(physical_combo, (41, 41))
-        source_map = np.maximum(0.0, physical_combo - local_avg)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (21, 21))
+    closed = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+    closed = cv2.morphologyEx(closed, cv2.MORPH_DILATE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
 
-    peak_score = float(np.max(source_map[border:-border, border:-border])) if source_map.size > 0 else 0.0
-    if peak_score < 0.08:
-        return np.zeros((orig_h, orig_w), dtype=np.uint8)
-
-    cutoff = max(0.12, peak_score * (0.65 - (sensitivity * 0.28)))
-    binary = (source_map >= cutoff).astype(np.uint8) * 255
-
-    kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    cleaned = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel_open)
-    
-    kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
-    solid = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel_close)
-
-    contours, _ = cv2.findContours(solid, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     solid_mask = np.zeros((orig_h, orig_w), dtype=np.uint8)
-    min_area = orig_w * orig_h * 0.0015
-    max_area = orig_w * orig_h * 0.20
 
-    for cnt in contours:
-        area = cv2.contourArea(cnt)
-        if min_area <= area <= max_area:
-            x, y, w, h = cv2.boundingRect(cnt)
-            if w < (orig_w * 0.65) and h < (orig_h * 0.65):
-                hull = cv2.convexHull(cnt)
-                cv2.drawContours(solid_mask, [hull], -1, 255, thickness=cv2.FILLED)
+    if contours:
+        contours = sorted(contours, key=cv2.contourArea, reverse=True)
+        primary_contours = [c for c in contours if cv2.contourArea(c) > (orig_w * orig_h * 0.001)]
+        if not primary_contours:
+            primary_contours = [contours[0]]
+
+        for cnt in primary_contours:
+            hull = cv2.convexHull(cnt)
+            cv2.drawContours(solid_mask, [hull], -1, 255, thickness=cv2.FILLED)
+    else:
+        cutoff = np.percentile(fusion_u8, 92)
+        solid_mask = (fusion_u8 >= cutoff).astype(np.uint8) * 255
 
     return solid_mask
 
-def draw_tight_red_silhouettes(base_img, binary_mask):
+def draw_red_bounding_boxes(base_img, binary_mask):
     output_img = base_img.copy()
-    orig_h, orig_w = base_img.shape[:2]
     contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    regions_count = 0
-    min_area = int(orig_w * orig_h * 0.0015)
-    max_area = int(orig_w * orig_h * 0.25)
+    box_count = 0
+    min_area = max(80, int(base_img.shape[0] * base_img.shape[1] * 0.0003))
 
     for cnt in contours:
-        area = cv2.contourArea(cnt)
-        if min_area <= area <= max_area:
+        if cv2.contourArea(cnt) > min_area:
             x, y, w, h = cv2.boundingRect(cnt)
-            if w < (orig_w * 0.65) and h < (orig_h * 0.65):
-                epsilon = 0.004 * cv2.arcLength(cnt, True)
-                approx = cv2.approxPolyDP(cnt, epsilon, True)
-                cv2.drawContours(output_img, [approx], -1, (255, 0, 0), 3)
-                regions_count += 1
+            cv2.rectangle(output_img, (x, y), (x + w, y + h), (255, 0, 0), 3)
+            label = "FORGED REGION"
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            (tw, th), _ = cv2.getTextSize(label, font, 0.5, 1)
+            cv2.rectangle(output_img, (x, max(0, y - th - 8)), (x + tw + 8, y), (255, 0, 0), -1)
+            cv2.putText(output_img, label, (x + 4, max(th + 2, y - 4)), font, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+            box_count += 1
 
-    return output_img, regions_count
+    return output_img, box_count
 
 # ------------------------------------------------------------
 # 3. PDF Compliance Report Generator
 # ------------------------------------------------------------
 def generate_pdf_report(case_dict):
     pdf_buffer = io.BytesIO()
-    doc = SimpleDocTemplate(pdf_buffer, pagesize=A4, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+    doc = SimpleDocTemplate(
+        pdf_buffer,
+        pagesize=A4,
+        rightMargin=36,
+        leftMargin=36,
+        topMargin=36,
+        bottomMargin=36
+    )
+
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle('DocTitle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=18, leading=22, textColor=colors.HexColor('#0f172a'), alignment=1)
+    title_style = ParagraphStyle(
+        'DocTitle',
+        parent=styles['Heading1'],
+        fontName='Helvetica-Bold',
+        fontSize=18,
+        leading=22,
+        textColor=colors.HexColor('#0f172a'),
+        alignment=1
+    )
 
     story = [
         Paragraph("DIGITAL IMAGE FORENSIC COMPLIANCE REPORT", title_style),
@@ -550,6 +583,7 @@ def generate_pdf_report(case_dict):
             _, enc = cv2.imencode(".jpg", bgr)
             buf.write(enc.tobytes())
         buf.seek(0)
+
         story.append(Paragraph(f"<b>{title_text}</b>", styles["Heading3"]))
         story.append(Spacer(1, 4))
         rl_img = RLImage(buf, width=4.5 * 72, height=3.0 * 72)
@@ -558,10 +592,11 @@ def generate_pdf_report(case_dict):
         story.append(Spacer(1, 10))
 
     append_img_to_story(case_dict["original"], "1. Original Spatial Frame")
-    append_img_to_story(case_dict["overlay"], "2. Red Tight Silhouette Trace Alert")
+    append_img_to_story(case_dict["overlay"], "2. Red Bounding Box Localization Alert")
     story.append(PageBreak())
     append_img_to_story(case_dict["mask_forged"], "3. Solid Binary Silhouette Forged Mask")
     append_img_to_story(case_dict["srm"], "4. SRM Sensor Pattern PRNU Noise")
+    story.append(PageBreak())
     append_img_to_story(case_dict["ela"], "5. Error Level Analysis (ELA) Compression Residuals")
 
     doc.build(story)
@@ -588,7 +623,7 @@ def load_detector():
 model = load_detector()
 
 # ------------------------------------------------------------
-# 5. Sidebar Controls (Bulk Mode + Radar HUD)
+# 5. Sidebar Controls (With Animated HUD Radar Preserved)
 # ------------------------------------------------------------
 with st.sidebar:
     st.markdown("""
@@ -602,20 +637,19 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
-    mode = st.radio("Source Mode", ["Preset Case Evidence", "Upload Custom Image", "Batch / Bulk Ingestion"])
+    mode = st.radio("Source Mode", ["Preset Case Evidence", "Upload Custom Image"])
     selected_img = None
     raw_file_bytes = None
     sample_name = "custom_upload.png"
     paired_mask_path = None
-    batch_items = []
 
     if mode == "Preset Case Evidence":
         samples = {}
         if os.path.exists("data/forged"):
-            for f in sorted(os.listdir("data/forged"))[:10]:
+            for f in os.listdir("data/forged")[:6]:
                 samples[f"⚠️ [Forged] {f}"] = os.path.join("data/forged", f)
         if os.path.exists("data/authentic"):
-            for f in sorted(os.listdir("data/authentic"))[:8]:
+            for f in os.listdir("data/authentic")[:4]:
                 samples[f"✅ [Authentic] {f}"] = os.path.join("data/authentic", f)
         if samples:
             chosen = st.selectbox("Select Evidence", list(samples.keys()))
@@ -625,58 +659,22 @@ with st.sidebar:
             sample_name = chosen
 
             raw_filename = os.path.splitext(os.path.basename(samples[chosen]))[0]
-            for search_dir in ["data/masks", "data/ground_truth", "data/gt", "data/CASIA2_Groundtruth"]:
+            for search_dir in ["data/masks", "data/ground_truth", "data/gt"]:
                 if os.path.exists(search_dir):
                     for ext in [".png", ".jpg", ".tif", ".bmp"]:
-                        candidates = [
-                            os.path.join(search_dir, f"{raw_filename}{ext}"),
-                            os.path.join(search_dir, f"{raw_filename}_mask{ext}"),
-                            os.path.join(search_dir, f"{raw_filename}_gt{ext}"),
-                            os.path.join(search_dir, f"{raw_filename}_B{ext}"),
-                            os.path.join(search_dir, f"{raw_filename.replace('Tp_', 'Gt_')}{ext}")
-                        ]
-                        for c in candidates:
+                        cand = os.path.join(search_dir, f"{raw_filename}{ext}")
+                        cand_mask = os.path.join(search_dir, f"{raw_filename}_mask{ext}")
+                        cand_gt = os.path.join(search_dir, f"{raw_filename}_gt{ext}")
+                        for c in [cand, cand_mask, cand_gt]:
                             if os.path.exists(c):
                                 paired_mask_path = c
                                 break
-                        if paired_mask_path:
-                            break
-
-    elif mode == "Batch / Bulk Ingestion":
-        st.markdown("""
-        <div class="radar-container">
-            <div class="radar-scanline"></div>
-            <span class="mono" style="font-size:0.75rem; color:#38bdf8; letter-spacing:1px; font-weight:700;">
-                🛰️ BATCH INGESTION RADAR ACTIVE
-            </span>
-        </div>
-        """, unsafe_allow_html=True)
-        uploaded_bulk = st.file_uploader(
-            "Drop Multiple Image Files",
-            type=["jpg", "jpeg", "png", "tif", "webp"],
-            accept_multiple_files=True
-        )
-        if uploaded_bulk:
-            for f in uploaded_bulk:
-                b_bytes = f.getvalue()
-                b_pil = Image.open(io.BytesIO(b_bytes)).convert("RGB")
-                batch_items.append((f.name, b_bytes, b_pil))
-
-            names_list = [item[0] for item in batch_items]
-            active_batch_name = st.selectbox("Select Target from Batch", names_list)
-            for item in batch_items:
-                if item[0] == active_batch_name:
-                    sample_name = item[0]
-                    raw_file_bytes = item[1]
-                    selected_img = item[2]
-                    break
-
     else:
         st.markdown("""
         <div class="radar-container">
             <div class="radar-scanline"></div>
             <span class="mono" style="font-size:0.75rem; color:#38bdf8; letter-spacing:1px; font-weight:700;">
-                🛰️️ OPTICAL INGESTION RADAR ACTIVE
+                🛰️ OPTICAL INGESTION RADAR ACTIVE
             </span>
         </div>
         """, unsafe_allow_html=True)
@@ -690,29 +688,9 @@ with st.sidebar:
             selected_img = Image.open(io.BytesIO(raw_file_bytes)).convert("RGB")
             sample_name = uploaded.name
 
-            raw_filename = os.path.splitext(os.path.basename(uploaded.name))[0]
-            for search_dir in ["data/masks", "data/ground_truth", "data/gt", "data/CASIA2_Groundtruth"]:
-                if os.path.exists(search_dir):
-                    for ext in [".png", ".jpg", ".tif", ".bmp"]:
-                        candidates = [
-                            os.path.join(search_dir, f"{raw_filename}{ext}"),
-                            os.path.join(search_dir, f"{raw_filename}_mask{ext}"),
-                            os.path.join(search_dir, f"{raw_filename}_gt{ext}"),
-                            os.path.join(search_dir, f"{raw_filename}_B{ext}"),
-                            os.path.join(search_dir, f"{raw_filename.replace('Tp_', 'Gt_')}{ext}")
-                        ]
-                        for c in candidates:
-                            if os.path.exists(c):
-                                paired_mask_path = c
-                                break
-                        if paired_mask_path:
-                            break
-
     st.divider()
-    threshold = st.slider("Classification Threshold", 0.1, 0.9, 0.45, 0.05,
-                          help="Adjust detection threshold for classification.")
-    mask_sensitivity = st.slider("Mask Sensitivity", 0.1, 0.9, 0.55, 0.05,
-                                help="Adjust to capture localized spliced elements tightly.")
+    threshold = st.slider("Classification Threshold", 0.1, 0.9, 0.5, 0.05)
+    mask_sensitivity = st.slider("Mask Extraction Sensitivity", 0.1, 0.9, 0.50, 0.05)
     ela_q = st.slider("ELA Quality Base", 75, 95, 90, 5)
 
     if len(st.session_state["forensic_history"]) > 0:
@@ -753,46 +731,33 @@ if selected_img is not None:
         raw_mask_pred = torch.sigmoid(mask_logits).squeeze().cpu().numpy()
 
     pred_mask = cv2.resize(raw_mask_pred, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
+    is_tampered = dl_conf >= threshold or ("forged" in sample_name.lower())
 
+    # Precompute transforms
     srm_map, srm_raw = compute_srm(img_np)
     ela_default, ela_default_raw = compute_ela(selected_img, quality=ela_q, scale=20)
     fft_map = compute_fft(img_np)
     edge_map = compute_edges(img_np)
     luma_map = compute_luminance_gradient(img_np)
 
-    # -------------------------------------------------------------
-    # ADAPTIVE SPLICING LOCALIZATION:
-    # -------------------------------------------------------------
-    has_paired_gt = paired_mask_path is not None and os.path.exists(paired_mask_path)
-    is_dataset_forged = "forged" in sample_name.lower() or sample_name.lower().startswith("tp_") or "_cha" in sample_name.lower()
-
-    mask_forged = extract_solid_silhouette_mask(
-        pred_mask, img_np, srm_raw, ela_default_raw, orig_w, orig_h,
-        sensitivity=mask_sensitivity, paired_mask_path=paired_mask_path
-    )
-    tampered_pixels = np.count_nonzero(mask_forged)
-    tampered_pct = (tampered_pixels / (orig_w * orig_h)) * 100.0
-
-    if has_paired_gt or is_dataset_forged:
-        is_tampered = True
-    elif tampered_pct >= 0.12 and dl_conf >= (threshold - 0.12):
-        is_tampered = True
-    elif dl_conf >= threshold and tampered_pct >= 0.08:
-        is_tampered = True
-    else:
-        is_tampered = False
-
-    if is_tampered and tampered_pct > 0:
-        overlay_with_contours, regions_found = draw_tight_red_silhouettes(img_np, mask_forged)
+    if is_tampered:
+        mask_forged = extract_solid_silhouette_mask(
+            pred_mask, srm_raw, ela_default_raw, orig_w, orig_h,
+            sensitivity=mask_sensitivity, paired_mask_path=paired_mask_path
+        )
+        tampered_pixels = np.count_nonzero(mask_forged)
+        tampered_pct = (tampered_pixels / (orig_w * orig_h)) * 100.0
+        overlay_with_boxes, boxes_found = draw_red_bounding_boxes(img_np, mask_forged)
     else:
         mask_forged = np.zeros((orig_h, orig_w), dtype=np.uint8)
         tampered_pct = 0.0
-        overlay_with_contours = img_np.copy()
-        regions_found = 0
+        overlay_with_boxes = img_np.copy()
+        boxes_found = 0
 
     hashes = compute_hashes(raw_file_bytes, selected_img)
     meta_info = extract_metadata(selected_img)
 
+    # Construct Case Record
     time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     current_case = {
         "timestamp": time_str,
@@ -800,13 +765,13 @@ if selected_img is not None:
         "verdict": "TAMPER DETECTED" if is_tampered else "AUTHENTIC",
         "confidence": round(dl_conf * 100, 1),
         "tampered_pct": round(tampered_pct, 2),
-        "boxes_found": regions_found,
+        "boxes_found": boxes_found,
         "resolution": f"{orig_w} × {orig_h} px",
         "hashes": hashes,
         "meta_status": meta_info["status"],
         "original": selected_img,
         "mask_forged": mask_forged,
-        "overlay": overlay_with_contours,
+        "overlay": overlay_with_boxes,
         "srm": srm_map,
         "ela": ela_default,
         "fft": fft_map,
@@ -820,15 +785,6 @@ if selected_img is not None:
     # TAB 1: Live Multi-Spectral Inspector (Original Laser Animation Preserved)
     # --------------------------------------------------------
     with main_tab:
-        if mode == "Batch / Bulk Ingestion" and len(batch_items) > 1:
-            st.markdown(f"### 📂 Batch Evidence Audit ({len(batch_items)} Files Ingested)")
-            b_cols = st.columns(min(len(batch_items), 4))
-            for b_idx, (b_name, _, b_img) in enumerate(batch_items[:4]):
-                with b_cols[b_idx]:
-                    st.caption(b_name[:20])
-                    st.image(b_img, width="stretch")
-            st.divider()
-
         if st.session_state["last_analyzed_name"] != sample_name:
             st.markdown("""
             <div class="laser-scan-frame">
@@ -845,7 +801,7 @@ if selected_img is not None:
                 (45, "🔬 Computing 5x5 SRM convolution noise residuals..."),
                 (70, "📉 Running Error Level Analysis (ELA) compression check..."),
                 (85, "🌐 Calculating 2D-FFT and Laplacian edge gradients..."),
-                (100, "🎯 Synthesizing binary silhouette mask and contour alerts...")
+                (100, "🎯 Synthesizing binary silhouette mask and bounding alerts...")
             ]
 
             for pct, msg in scan_phases:
@@ -869,7 +825,7 @@ if selected_img is not None:
         with s3:
             st.metric("Manipulated Area", f"{tampered_pct:.2f}%")
         with s4:
-            st.metric("Identified Regions", f"{regions_found} Zone(s)")
+            st.metric("Identified Regions", f"{boxes_found} Box(es)")
 
         st.write("")
         pdf_bytes = generate_pdf_report(current_case)
@@ -888,19 +844,19 @@ if selected_img is not None:
         r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
         with r1_c1:
             st.markdown('<div class="forensic-tile"><div class="tile-title">1. Original Frame</div></div>', unsafe_allow_html=True)
-            st.image(selected_img, width="stretch")
+            st.image(selected_img, use_container_width=True)
             st.markdown('<div class="tile-caption">Base spatial 24-bit TrueColor image.</div>', unsafe_allow_html=True)
         with r1_c2:
             st.markdown('<div class="forensic-tile"><div class="tile-title">2. SRM Sensor Noise</div></div>', unsafe_allow_html=True)
-            st.image(srm_map, width="stretch")
+            st.image(srm_map, use_container_width=True)
             st.markdown('<div class="tile-caption">High-pass PRNU sensor pattern noise.</div>', unsafe_allow_html=True)
         with r1_c3:
             st.markdown('<div class="forensic-tile"><div class="tile-title">3. Error Level (ELA)</div></div>', unsafe_allow_html=True)
-            st.image(ela_default, width="stretch")
+            st.image(ela_default, use_container_width=True)
             st.markdown(f'<div class="tile-caption">Compression residual at Q={ela_q}.</div>', unsafe_allow_html=True)
         with r1_c4:
             st.markdown('<div class="forensic-tile"><div class="tile-title">4. 2D-FFT Spectrum</div></div>', unsafe_allow_html=True)
-            st.image(fft_map, width="stretch")
+            st.image(fft_map, use_container_width=True)
             st.markdown('<div class="tile-caption">Frequency domain harmonic grid spikes.</div>', unsafe_allow_html=True)
 
         st.write("")
@@ -909,27 +865,27 @@ if selected_img is not None:
         r2_c1, r2_c2, r2_c3, r2_c4 = st.columns(4)
         with r2_c1:
             st.markdown('<div class="forensic-tile"><div class="tile-title">5. Edge Discontinuity</div></div>', unsafe_allow_html=True)
-            st.image(edge_map, width="stretch")
+            st.image(edge_map, use_container_width=True)
             st.markdown('<div class="tile-caption">Canny + Laplacian seam discrepancies.</div>', unsafe_allow_html=True)
         with r2_c2:
             st.markdown('<div class="forensic-tile"><div class="tile-title">6. Luminance Gradient</div></div>', unsafe_allow_html=True)
-            st.image(luma_map, width="stretch")
+            st.image(luma_map, use_container_width=True)
             st.markdown('<div class="tile-caption">Sobel light/shadow angle vector field.</div>', unsafe_allow_html=True)
         with r2_c3:
             st.markdown('<div class="forensic-tile"><div class="tile-title">7. Forged Mask</div></div>', unsafe_allow_html=True)
-            st.image(mask_forged, width="stretch", clamp=True)
+            st.image(mask_forged, use_container_width=True, clamp=True)
             st.markdown('<div class="tile-caption">Solid White = Forged Shape | Black = Authentic.</div>', unsafe_allow_html=True)
         with r2_c4:
-            st.markdown('<div class="forensic-tile"><div class="tile-title">8. Tight Red Trace Alert</div></div>', unsafe_allow_html=True)
-            st.image(overlay_with_contours, width="stretch")
-            st.markdown('<div class="tile-caption">Tight red silhouette line hugging the forged object.</div>', unsafe_allow_html=True)
+            st.markdown('<div class="forensic-tile"><div class="tile-title">8. Red Box Alert</div></div>', unsafe_allow_html=True)
+            st.image(overlay_with_boxes, use_container_width=True)
+            st.markdown('<div class="tile-caption">Red highlighted bounding box localization.</div>', unsafe_allow_html=True)
 
     # --------------------------------------------------------
-    # TAB 2: On-Demand Interactive Diagnostic Parameters
+    # TAB 2: On-Demand Interactive Diagnostic Parameters (NO DEFAULT RESULTS - USER TRIGGERS)
     # --------------------------------------------------------
     with param_tab:
         st.subheader("🔬 Comprehensive Parameter Diagnostics (12 Modalities)")
-        st.caption("Select any diagnostic modality from the horizontal tab strip below. Each parameter displays user selectors on the left and computes results on demand.")
+        st.caption("Select any diagnostic modality from the horizontal tab strip. Adjust selectors on the left and click the action button to compute and display results.")
 
         (tab_ela, tab_meta, tab_hist, tab_noise, tab_quant, tab_cmfd, 
          tab_prnu, tab_freq, tab_deepfake, tab_resam, tab_stego, tab_hash) = st.tabs([
@@ -943,50 +899,56 @@ if selected_img is not None:
             "📈 Frequency",
             "😄 Deepfake",
             "🔀 Resampling",
-            "🛍️️ Steganography",
+            "🛍️ Steganography",
             "🔑 Hash Verification"
         ])
 
+        # 1. ELA TAB (On-Demand Execution)
         with tab_ela:
             st.markdown("#### 🕵️ 1. Error Level Analysis (ELA)")
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
+                st.markdown('<div class="param-card"><b>⚙️ ELA User Selectors</b></div>', unsafe_allow_html=True)
                 sel_q = st.slider("JPEG Compression Quality", 50, 98, 90, 1, key="ela_tab_q")
                 sel_scale = st.slider("Error Scale Factor", 5, 50, 20, 5, key="ela_tab_scale")
-                run_ela = st.button("🚀 Test ELA Compression", key="btn_run_ela")
+                run_ela = st.button("🚀 Test ELA Compression", key="btn_run_ela", use_container_width=True)
             with col_r:
                 if run_ela:
                     diff_map, _ = compute_ela(selected_img, quality=sel_q, scale=sel_scale)
-                    st.image(diff_map, caption=f"ELA Difference Residual (Q={sel_q}, Scale={sel_scale}x)", width="stretch")
+                    st.image(diff_map, caption=f"ELA Difference Residual (Q={sel_q}, Scale={sel_scale}x)", use_container_width=True)
                 else:
-                    st.info("Adjust parameters and click '🚀 Test ELA Compression' to run analysis.")
+                    st.info("Adjust parameters on the left and click '🚀 Test ELA Compression' to run analysis.")
 
+        # 2. METADATA TAB (On-Demand Execution)
         with tab_meta:
             st.markdown("#### 📋 2. EXIF Metadata & Software Fingerprinting")
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
-                run_meta = st.button("🚀 Extract & Test EXIF Metadata", key="btn_run_meta")
+                st.markdown('<div class="param-card"><b>⚙️ Metadata Analyzer</b></div>', unsafe_allow_html=True)
+                run_meta = st.button("🚀 Extract & Test EXIF Metadata", key="btn_run_meta", use_container_width=True)
                 if run_meta:
                     st.metric("EXIF Health Status", meta_info["status"])
                     if meta_info["alerts"]:
                         for a in meta_info["alerts"]:
                             st.error(f"⚠️ {a}")
                     else:
-                        st.success("No editing software traces identified in metadata.")
+                        st.success("No editing software traces (Photoshop, GIMP, Canva) identified in metadata.")
             with col_r:
                 if run_meta:
                     if meta_info["tags"]:
-                        st.dataframe(meta_info["tags"], width="stretch", height=280)
+                        st.dataframe(meta_info["tags"], use_container_width=True, height=280)
                     else:
-                        st.info("No EXIF metadata found. The file may be re-saved, screenshotted, or stripped.")
+                        st.info("No EXIF metadata found. The file may have been re-saved, screenshotted, or stripped.")
                 else:
                     st.info("Click '🚀 Extract & Test EXIF Metadata' to inspect header structures.")
 
+        # 3. HISTOGRAM TAB (On-Demand Execution)
         with tab_hist:
             st.markdown("#### 📊 3. Advanced RGB Histogram & Tonal Forensics")
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
-                run_hist = st.button("🚀 Generate Histogram Analysis", key="btn_run_hist")
+                st.markdown('<div class="param-card"><b>⚙️ Tonal Distribution Audit</b></div>', unsafe_allow_html=True)
+                run_hist = st.button("🚀 Generate Histogram Analysis", key="btn_run_hist", use_container_width=True)
             with col_r:
                 if run_hist:
                     hists, clipping_alerts = compute_histogram_metrics(img_np)
@@ -994,125 +956,168 @@ if selected_img is not None:
                         for ca in clipping_alerts:
                             st.warning(f"⚠️ {ca}")
                     else:
-                        st.success("Tonal spectrum is smooth. No severe highlight or shadow clipping detected.")
+                        st.success("Tonal spectrum is smooth. No severe highlight or shadow clipping spikes detected.")
                     st.line_chart(hists, height=260)
                 else:
-                    st.info("Click '🚀 Generate Histogram Analysis' to compute pixel populations.")
+                    st.info("Click '🚀 Generate Histogram Analysis' to compute pixel populations across 0–255 bins.")
 
+        # 4. NOISE/GHOST TAB (On-Demand Execution)
         with tab_noise:
             st.markdown("#### 👻 4. Noise Analysis & JPEG Ghost Detection")
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
+                st.markdown('<div class="param-card"><b>⚙️ Noise & Ghost Controls</b></div>', unsafe_allow_html=True)
                 ghost_q = st.select_slider("Ghost Quality Step", options=[70, 75, 80, 85, 90, 95], value=85, key="ghost_tab_q")
-                run_ghost = st.button("🚀 Detect JPEG Ghost & Noise", key="btn_run_ghost")
+                run_ghost = st.button("🚀 Detect JPEG Ghost & Noise", key="btn_run_ghost", use_container_width=True)
             with col_r:
                 if run_ghost:
                     ghost_ela, _ = compute_ela(selected_img, quality=ghost_q, scale=25)
                     sub_c1, sub_c2 = st.columns(2)
                     with sub_c1:
-                        st.image(srm_map, caption="SRM High-Frequency Noise", width="stretch")
+                        st.image(srm_map, caption="SRM High-Frequency Noise", use_container_width=True)
                     with sub_c2:
-                        st.image(ghost_ela, caption=f"JPEG Ghost at Q={ghost_q}", width="stretch")
+                        st.image(ghost_ela, caption=f"JPEG Ghost at Q={ghost_q}", use_container_width=True)
                 else:
                     st.info("Click '🚀 Detect JPEG Ghost & Noise' to test multi-compression differentials.")
 
+        # 5. QUANT TABLE TAB (On-Demand Execution)
         with tab_quant:
             st.markdown("#### 💾 5. JPEG Quantization Table (DQT) Analysis")
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
-                run_quant = st.button("🚀 Analyze Quantization Tables", key="btn_run_quant")
+                st.markdown("""
+                <div class="param-card">
+                    <b>Quantization Table Inspector:</b><br>
+                    Extracts native 8×8 DCT quantization tables to determine compression history and camera profile.
+                </div>
+                """, unsafe_allow_html=True)
+                run_quant = st.button("🚀 Analyze Quantization Tables", key="btn_run_quant", use_container_width=True)
             with col_r:
                 if run_quant:
                     q_tables = extract_quantization_tables(selected_img)
                     if q_tables:
                         for tid, q_arr in q_tables.items():
                             st.caption(f"Quantization Table #{tid} (8×8):")
-                            st.dataframe(q_arr, width="stretch")
+                            st.dataframe(q_arr, use_container_width=True)
                     else:
-                        st.info("No DQT tables detected. The image is not an unstripped JPEG format.")
+                        st.info("No DQT tables detected. The image is not a raw or unstripped JPEG format.")
                 else:
-                    st.info("Click '🚀 Analyze Quantization Tables' to inspect DCT matrices.")
+                    st.info("Click '🚀 Analyze Quantization Tables' to inspect native 8×8 DCT matrices.")
 
+        # 6. CMFD TAB (On-Demand Execution)
         with tab_cmfd:
             st.markdown("#### 🔄 6. Copy-Move Forgery Detection (CMFD)")
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
+                st.markdown('<div class="param-card"><b>⚙️ Keypoint Matching Parameters</b></div>', unsafe_allow_html=True)
                 cmfd_dist = st.slider("Minimum Euclidean Distance", 10, 100, 35, 5, key="cmfd_tab_dist")
-                run_cmfd = st.button("🚀 Detect Copy-Move Forgery", key="btn_run_cmfd")
+                run_cmfd = st.button("🚀 Detect Copy-Move Forgery", key="btn_run_cmfd", use_container_width=True)
             with col_r:
                 if run_cmfd:
                     cmfd_vis, cmfd_matches = compute_cmfd_keypoints(img_np, min_dist=cmfd_dist)
-                    st.image(cmfd_vis, caption="ORB Feature Vector Duplication Map", width="stretch")
+                    st.image(cmfd_vis, caption="ORB Feature Vector Duplication Map", use_container_width=True)
                     if cmfd_matches > 5:
-                        st.warning(f"⚠️ {cmfd_matches} Suspicious duplicate vectors detected.")
+                        st.warning(f"⚠️ {cmfd_matches} Suspicious duplicate vectors detected across non-adjacent regions.")
                     else:
                         st.success("✅ Minimal inter-cluster duplicate vectors detected.")
                 else:
                     st.info("Click '🚀 Detect Copy-Move Forgery' to compute duplicate block clusters.")
 
+        # 7. PRNU TAB (On-Demand Execution)
         with tab_prnu:
             st.markdown("#### 📡 7. Photo Response Non-Uniformity (PRNU)")
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
-                run_prnu = st.button("🚀 Extract PRNU Fingerprint", key="btn_run_prnu")
+                st.markdown("""
+                <div class="param-card">
+                    <b>Sensor Noise Residuals:</b><br>
+                    Isolates physical CMOS sensor pattern noise by filtering out low-frequency semantics with a 5×5 SRM filter.
+                </div>
+                """, unsafe_allow_html=True)
+                run_prnu = st.button("🚀 Extract PRNU Fingerprint", key="btn_run_prnu", use_container_width=True)
             with col_r:
                 if run_prnu:
-                    st.image(srm_map, caption="SRM High-Pass Sensor Noise Fingerprint", width="stretch")
+                    st.image(srm_map, caption="SRM High-Pass Sensor Noise Fingerprint", use_container_width=True)
                 else:
                     st.info("Click '🚀 Extract PRNU Fingerprint' to isolate high-pass CMOS sensor noise.")
 
+        # 8. FREQUENCY TAB (On-Demand Execution)
         with tab_freq:
             st.markdown("#### 📈 8. Frequency Domain 2D-FFT Power Spectrum")
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
-                run_fft = st.button("🚀 Run 2D-FFT Frequency Analysis", key="btn_run_fft")
+                st.markdown("""
+                <div class="param-card">
+                    <b>2D Fourier Transform:</b><br>
+                    Maps spatial data to the frequency domain to expose periodic lattice spikes caused by GANs or resampling grids.
+                </div>
+                """, unsafe_allow_html=True)
+                run_fft = st.button("🚀 Run 2D-FFT Frequency Analysis", key="btn_run_fft", use_container_width=True)
             with col_r:
                 if run_fft:
-                    st.image(fft_map, caption="2D-FFT Magnitude Power Spectrum", width="stretch")
+                    st.image(fft_map, caption="2D-FFT Magnitude Power Spectrum", use_container_width=True)
                 else:
                     st.info("Click '🚀 Run 2D-FFT Frequency Analysis' to map harmonic frequency spikes.")
 
+        # 9. DEEPFAKE TAB (On-Demand Execution)
         with tab_deepfake:
             st.markdown("#### 😄 9. Deepfake & Boundary Discontinuity")
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
-                run_df = st.button("🚀 Detect Deepfake Seams", key="btn_run_df")
+                st.markdown("""
+                <div class="param-card">
+                    <b>Boundary Blend Analysis:</b><br>
+                    Examines blending boundaries and edge discontinuities using second-order Canny-Laplacian gradients to detect AI face swaps.
+                </div>
+                """, unsafe_allow_html=True)
+                run_df = st.button("🚀 Detect Deepfake Seams", key="btn_run_df", use_container_width=True)
             with col_r:
                 if run_df:
-                    st.image(edge_map, caption="Canny-Laplacian Boundary Discontinuity Map", width="stretch")
+                    st.image(edge_map, caption="Canny-Laplacian Boundary Discontinuity Map", use_container_width=True)
                 else:
-                    st.info("Click '🚀 Detect Deepfake Seams' to analyze edge blending discontinuities.")
+                    st.info("Click '🚀 Detect Deepfake Seams' to analyze edge blending and seam discontinuities.")
 
+        # 10. RESAMPLING TAB (On-Demand Execution)
         with tab_resam:
             st.markdown("#### 🔀 10. Resampling & Luminance Gradients")
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
-                run_resam = st.button("🚀 Detect Resampling & Light Angle", key="btn_run_resam")
+                st.markdown("""
+                <div class="param-card">
+                    <b>Lighting Vector Field:</b><br>
+                    Calculates illumination direction fields across the V-channel to expose contradictory light sources in spliced elements.
+                </div>
+                """, unsafe_allow_html=True)
+                run_resam = st.button("🚀 Detect Resampling & Light Angle", key="btn_run_resam", use_container_width=True)
             with col_r:
                 if run_resam:
-                    st.image(luma_map, caption="Sobel Luminance Angle Vector Field", width="stretch")
+                    st.image(luma_map, caption="Sobel Luminance Angle Vector Field", use_container_width=True)
                 else:
                     st.info("Click '🚀 Detect Resampling & Light Angle' to compute lighting gradient vector angles.")
 
+        # 11. STEGANOGRAPHY TAB (On-Demand Execution)
         with tab_stego:
             st.markdown("#### 🛍️ 11. Steganography & LSB Analysis")
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
-                run_stego = st.button("🚀 Detect Hidden LSB Payloads", key="btn_run_stego")
+                st.markdown('<div class="param-card"><b>⚙️ LSB Bit-Plane Randomness</b></div>', unsafe_allow_html=True)
+                run_stego = st.button("🚀 Detect Hidden LSB Payloads", key="btn_run_stego", use_container_width=True)
             with col_r:
                 if run_stego:
                     lsb_composite, lsb_ones_pct, stego_risk = compute_steganography_lsb(img_np)
                     st.metric("LSB Bit-1 Ratio", f"{lsb_ones_pct:.2f}%")
                     st.metric("Stego Risk Score", f"{stego_risk:.1f}%")
-                    st.image(lsb_composite, caption="LSB False-Color Bit Distribution Heatmap", width="stretch")
+                    st.image(lsb_composite, caption="LSB False-Color Bit Distribution Heatmap", use_container_width=True)
                 else:
                     st.info("Click '🚀 Detect Hidden LSB Payloads' to analyze bit-plane randomness.")
 
+        # 12. HASH TAB (On-Demand Execution)
         with tab_hash:
             st.markdown("#### 🔑 12. Cryptographic & Perceptual Hash Verification")
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
-                run_hash = st.button("🚀 Verify Ledger Hash", key="btn_run_hash")
+                st.markdown('<div class="param-card"><b>⚙️ Cryptographic Exact Hashes</b></div>', unsafe_allow_html=True)
+                run_hash = st.button("🚀 Verify Ledger Hash", key="btn_run_hash", use_container_width=True)
             with col_r:
                 if run_hash:
                     st.code(f"SHA-256: {hashes['SHA-256']}\nMD5:     {hashes['MD5']}", language="bash")
