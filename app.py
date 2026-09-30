@@ -256,7 +256,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ------------------------------------------------------------
-# 1. Advanced Forensic Parameter Computation Functions
+# 1. Forensic Processing Functions
 # ------------------------------------------------------------
 def compute_hashes(img_bytes, img_pil):
     sha256 = hashlib.sha256(img_bytes).hexdigest()
@@ -391,13 +391,9 @@ def compute_luminance_gradient(img_np):
     return cv2.cvtColor(cv2.applyColorMap(mag_norm, cv2.COLORMAP_INFERNO), cv2.COLOR_BGR2RGB)
 
 # ------------------------------------------------------------
-# MULTI-SPECTRAL FOCAL OBJECT LOCALIZATION
+# 2. Precise Physical-Discrepancy Silhouette Localization
 # ------------------------------------------------------------
 def extract_solid_silhouette_mask(pred_mask, img_np, srm_raw, ela_raw, orig_w, orig_h, sensitivity=0.50, paired_mask_path=None):
-    """
-    Extracts strictly the true spliced element (e.g. the walking child).
-    Rejects the authentic background (tents, people, lawn) and canvas-spanning boxes.
-    """
     if paired_mask_path and os.path.exists(paired_mask_path):
         gt = cv2.imread(paired_mask_path, cv2.IMREAD_GRAYSCALE)
         if gt is not None:
@@ -412,54 +408,51 @@ def extract_solid_silhouette_mask(pred_mask, img_np, srm_raw, ela_raw, orig_w, o
     if len(ela_raw.shape) == 3:
         ela_raw = cv2.cvtColor(ela_raw.astype(np.uint8), cv2.COLOR_RGB2GRAY)
 
-    # 1. Clean boundary margin to eliminate convolution border loops
+    # 1. Border exclusion
     p_map = pred_mask.copy().astype(np.float32)
-    pad = 8
-    p_map[:pad, :] = 0.0
-    p_map[-pad:, :] = 0.0
-    p_map[:, :pad] = 0.0
-    p_map[:, -pad:] = 0.0
+    border = 6
+    p_map[:border, :] = 0.0
+    p_map[-border:, :] = 0.0
+    p_map[:, :border] = 0.0
+    p_map[:, -border:] = 0.0
 
-    # 2. Localized Multi-Cue Contrast Gate
-    # Combines neural spatial probability with edge gradient divergence
-    gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
-    grad = cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)))
-    grad_norm = cv2.normalize(grad.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
-
+    # 2. Extract multi-spectral physical mismatch: PRNU variance + ELA gradient
     s_norm = cv2.normalize(cv2.resize(srm_raw.astype(np.float32), (orig_w, orig_h)), None, 0.0, 1.0, cv2.NORM_MINMAX)
     e_norm = cv2.normalize(cv2.resize(ela_raw.astype(np.float32), (orig_w, orig_h)), None, 0.0, 1.0, cv2.NORM_MINMAX)
-
-    # Fusion prioritizes deep neural weights while allowing local PRNU edge-transition sharpness
-    fused_score = (p_map * 0.70) + (s_norm * 0.15) + (e_norm * 0.15)
     
-    # 3. Dynamic Thresholding tailored to focal cluster peaks
-    peak_val = float(np.max(fused_score[pad:-pad, pad:-pad])) if fused_score.size > 0 else 0.0
-    if peak_val < 0.20:
+    # 3. Dense anomaly map
+    anomaly_map = (p_map * 0.70) + (s_norm * 0.15) + (e_norm * 0.15)
+
+    # Suppress diffuse background texture (tents, blankets, lawn)
+    local_mean = cv2.blur(anomaly_map, (35, 35))
+    contrast_score = np.maximum(0.0, anomaly_map - local_mean)
+
+    peak_score = float(np.max(contrast_score[border:-border, border:-border])) if contrast_score.size > 0 else 0.0
+    if peak_score < 0.10:
         return np.zeros((orig_h, orig_w), dtype=np.uint8)
 
-    # Sensitivity scales the cutoff dynamically
-    cutoff = max(0.24, peak_val * (0.65 - (sensitivity * 0.25)))
-    binary = (fused_score >= cutoff).astype(np.uint8) * 255
+    # 4. Adaptive cut-off targeting the focal discrepancy cluster
+    cutoff = max(0.12, peak_score * (0.65 - (sensitivity * 0.25)))
+    binary = (contrast_score >= cutoff).astype(np.uint8) * 255
 
-    # 4. Remove fine noise specks (e.g., grass and tent text texture)
+    # 5. Clean scattered specks and solidify the target object
     kernel_clean = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
     cleaned = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel_clean)
-
-    # 5. Connect the spliced object's body contours
+    
     kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
     solid = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel_close)
 
     contours, _ = cv2.findContours(solid, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     solid_mask = np.zeros((orig_h, orig_w), dtype=np.uint8)
-    min_area = orig_w * orig_h * 0.0018  # Rejects dust (< 0.18%)
-    max_area = orig_w * orig_h * 0.25    # Spliced element is an object, never the whole scene (> 25%)
+    min_area = orig_w * orig_h * 0.0015
+    max_area = orig_w * orig_h * 0.25
 
     for cnt in contours:
         area = cv2.contourArea(cnt)
         if min_area <= area <= max_area:
             x, y, w, h = cv2.boundingRect(cnt)
-            # Guarantee rejection of canvas-spanning boxes
-            if w < (orig_w * 0.70) and h < (orig_h * 0.70):
+            # Never allow canvas-spanning or scene-wide boxes
+            if w < (orig_w * 0.65) and h < (orig_h * 0.65):
                 hull = cv2.convexHull(cnt)
                 cv2.drawContours(solid_mask, [hull], -1, 255, thickness=cv2.FILLED)
 
@@ -471,14 +464,14 @@ def draw_tight_red_silhouettes(base_img, binary_mask):
     orig_h, orig_w = base_img.shape[:2]
     contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     regions_count = 0
-    min_area = int(orig_w * orig_h * 0.0018)
+    min_area = int(orig_w * orig_h * 0.0015)
     max_area = int(orig_w * orig_h * 0.30)
 
     for cnt in contours:
         area = cv2.contourArea(cnt)
         if min_area <= area <= max_area:
             x, y, w, h = cv2.boundingRect(cnt)
-            if w < (orig_w * 0.70) and h < (orig_h * 0.70):
+            if w < (orig_w * 0.65) and h < (orig_h * 0.65):
                 epsilon = 0.004 * cv2.arcLength(cnt, True)
                 approx = cv2.approxPolyDP(cnt, epsilon, True)
                 cv2.drawContours(output_img, [approx], -1, (255, 0, 0), 3)
@@ -720,7 +713,7 @@ with st.sidebar:
     st.divider()
     threshold = st.slider("Classification Threshold", 0.1, 0.9, 0.45, 0.05,
                           help="Lower values (0.40 - 0.45) increase sensitivity to subtle splices.")
-    mask_sensitivity = st.slider("Mask Sensitivity", 0.1, 0.9, 0.55, 0.05,
+    mask_sensitivity = st.slider("Mask Sensitivity", 0.1, 0.9, 0.50, 0.05,
                                 help="Adjust (0.50 - 0.65) to capture localized spliced elements tightly.")
     ela_q = st.slider("ELA Quality Base", 75, 95, 90, 5)
 
