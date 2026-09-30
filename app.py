@@ -368,7 +368,7 @@ def compute_lighting_shadow_map(img_np):
     return cv2.cvtColor(cv2.applyColorMap(dir_u8, cv2.COLORMAP_OCEAN), cv2.COLOR_BGR2RGB)
 
 def compute_cmaf_copy_move(img_np):
-    """Advanced Test 4: CMAF Copy-Move Keypoint Matching (ORB Matcher)"""
+    """Advanced Test 4: CMAF Copy-Move Keypoint Matching (ORB Matcher)[cite: 15]"""
     gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
     orb = cv2.ORB_create(nfeatures=600)
     kp, des = orb.detectAndCompute(gray, None)
@@ -394,7 +394,7 @@ def compute_lsb_steganography(img_np):
     return cv2.cvtColor(cv2.applyColorMap(lsb.astype(np.uint8), cv2.COLORMAP_JET), cv2.COLOR_BGR2RGB), ratio, risk
 
 def compute_fft(img_np):
-    """Frequency Domain 2D-FFT Power Spectrum"""
+    """Frequency Domain 2D-FFT Power Spectrum[cite: 15]"""
     gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
     f = np.fft.fft2(gray)
     fshift = np.fft.fftshift(f)
@@ -493,7 +493,7 @@ def load_detector():
 model = load_detector()
 
 # ------------------------------------------------------------
-# 4. Sidebar Controls (Bulk Upload Supported)
+# 4. Sidebar Controls (Bulk Upload Supported)[cite: 14]
 # ------------------------------------------------------------
 with st.sidebar:
     st.markdown("""
@@ -532,7 +532,7 @@ with st.sidebar:
         <div class="radar-container">
             <div class="radar-scanline"></div>
             <span class="mono" style="font-size:0.75rem; color:#38bdf8; letter-spacing:1px; font-weight:700;">
-                🛰️ BATCH INGESTION RADAR ACTIVE
+                🛰️️ BATCH INGESTION RADAR ACTIVE
             </span>
         </div>
         """, unsafe_allow_html=True)
@@ -737,8 +737,8 @@ if selected_img is not None:
         ])
 
         with t_cmaf:
-            st.markdown("#### CMAF (Copy-Move Forgery Detection via Keypoints)")
-            st.write("Uses ORB feature vector matching to uncover duplicated regions pasted elsewhere in the image.")
+            st.markdown("#### CMAF (Copy-Move Forgery Detection via Keypoints)[cite: 15]")
+            st.write("Uses ORB feature vector matching to uncover duplicated regions pasted elsewhere in the image[cite: 15].")
             if st.button("🚀 Run CMAF Keypoint Analysis", key="btn_cmaf", use_container_width=True):
                 st.image(cmaf_vis, caption=f"CMAF Feature Vector Duplication Map ({cmaf_matches} matches)", use_container_width=True)
 
@@ -761,20 +761,20 @@ if selected_img is not None:
                 st.image(shadow_map, caption="Lighting & Shadow Vector Consistency Map", use_container_width=True)
 
         with t_srm:
-            st.markdown("#### SRM Sensor Noise & PRNU Fingerprint")
-            st.write("Isolates high-pass CMOS sensor pattern noise to verify sensor response uniformity.")
+            st.markdown("#### SRM Sensor Noise & PRNU Fingerprint[cite: 15]")
+            st.write("Isolates high-pass CMOS sensor pattern noise to verify sensor response uniformity[cite: 15].")
             if st.button("🚀 Extract PRNU / SRM Fingerprint", key="btn_srm", use_container_width=True):
                 st.image(srm_map, caption="SRM Sensor Noise Residuals", use_container_width=True)
 
         with t_ela:
-            st.markdown("#### Error Level Analysis (ELA)")
-            st.write("Quantifies compression history divergence at 90% JPEG quality.")
+            st.markdown("#### Error Level Analysis (ELA)[cite: 15]")
+            st.write("Quantifies compression history divergence at 90% JPEG quality[cite: 15].")
             if st.button("🚀 Run ELA Compression Test", key="btn_ela", use_container_width=True):
                 st.image(ela_default, caption="ELA Compression Residual", use_container_width=True)
 
         with t_fft:
-            st.markdown("#### Frequency Domain 2D-FFT Power Spectrum")
-            st.write("Exposes periodic grid patterns and GAN upsampling artifacts.")
+            st.markdown("#### Frequency Domain 2D-FFT Power Spectrum[cite: 15]")
+            st.write("Exposes periodic grid patterns and GAN upsampling artifacts[cite: 15].")
             if st.button("🚀 Run 2D-FFT Spectrum", key="btn_fft", use_container_width=True):
                 st.image(fft_map, caption="2D-FFT Power Spectrum", use_container_width=True)
 
@@ -811,9 +811,9 @@ if selected_img is not None:
             st.write("Maintains immutable session audit trails.")
             st.json(st.session_state["forensic_history"][:3])
 
-    # --------------------------------------------------------
+    # ------------------------------------------------------------
     # TAB 3: History Audit
-    # --------------------------------------------------------
+    # ------------------------------------------------------------
     with history_tab:
         st.subheader("📜 Forensic Session Records & Historical Evidence Log")
         history_records = st.session_state["forensic_history"]
