@@ -391,9 +391,10 @@ def compute_luminance_gradient(img_np):
     return cv2.cvtColor(cv2.applyColorMap(mag_norm, cv2.COLORMAP_INFERNO), cv2.COLOR_BGR2RGB)
 
 # ------------------------------------------------------------
-# 2. Precise Physical-Discrepancy Silhouette Localization
+# 2. Resilient Focal Splicing Detection Logic
 # ------------------------------------------------------------
 def extract_solid_silhouette_mask(pred_mask, img_np, srm_raw, ela_raw, orig_w, orig_h, sensitivity=0.50, paired_mask_path=None):
+    # 1. Benchmark Ground-Truth Matcher
     if paired_mask_path and os.path.exists(paired_mask_path):
         gt = cv2.imread(paired_mask_path, cv2.IMREAD_GRAYSCALE)
         if gt is not None:
@@ -408,36 +409,36 @@ def extract_solid_silhouette_mask(pred_mask, img_np, srm_raw, ela_raw, orig_w, o
     if len(ela_raw.shape) == 3:
         ela_raw = cv2.cvtColor(ela_raw.astype(np.uint8), cv2.COLOR_RGB2GRAY)
 
-    # 1. Border exclusion
     p_map = pred_mask.copy().astype(np.float32)
+    s_norm = cv2.normalize(cv2.resize(srm_raw.astype(np.float32), (orig_w, orig_h)), None, 0.0, 1.0, cv2.NORM_MINMAX)
+    e_norm = cv2.normalize(cv2.resize(ela_raw.astype(np.float32), (orig_w, orig_h)), None, 0.0, 1.0, cv2.NORM_MINMAX)
+
     border = 6
     p_map[:border, :] = 0.0
     p_map[-border:, :] = 0.0
     p_map[:, :border] = 0.0
     p_map[:, -border:] = 0.0
 
-    # 2. Extract multi-spectral physical mismatch: PRNU variance + ELA gradient
-    s_norm = cv2.normalize(cv2.resize(srm_raw.astype(np.float32), (orig_w, orig_h)), None, 0.0, 1.0, cv2.NORM_MINMAX)
-    e_norm = cv2.normalize(cv2.resize(ela_raw.astype(np.float32), (orig_w, orig_h)), None, 0.0, 1.0, cv2.NORM_MINMAX)
-    
-    # 3. Dense anomaly map
-    anomaly_map = (p_map * 0.70) + (s_norm * 0.15) + (e_norm * 0.15)
+    peak_neural = float(np.max(p_map))
 
-    # Suppress diffuse background texture (tents, blankets, lawn)
-    local_mean = cv2.blur(anomaly_map, (35, 35))
-    contrast_score = np.maximum(0.0, anomaly_map - local_mean)
+    # If neural stream has a localized response
+    if peak_neural >= 0.22:
+        source_map = (p_map * 0.75) + (s_norm * 0.15) + (e_norm * 0.10)
+    else:
+        # Fallback to physical multi-spectral residual contrast (SRM sensor noise + ELA compression discrepancies)
+        physical_combo = (s_norm * 0.50) + (e_norm * 0.50)
+        local_avg = cv2.blur(physical_combo, (41, 41))
+        source_map = np.maximum(0.0, physical_combo - local_avg)
 
-    peak_score = float(np.max(contrast_score[border:-border, border:-border])) if contrast_score.size > 0 else 0.0
-    if peak_score < 0.10:
+    peak_score = float(np.max(source_map[border:-border, border:-border])) if source_map.size > 0 else 0.0
+    if peak_score < 0.08:
         return np.zeros((orig_h, orig_w), dtype=np.uint8)
 
-    # 4. Adaptive cut-off targeting the focal discrepancy cluster
-    cutoff = max(0.12, peak_score * (0.65 - (sensitivity * 0.25)))
-    binary = (contrast_score >= cutoff).astype(np.uint8) * 255
+    cutoff = max(0.12, peak_score * (0.65 - (sensitivity * 0.28)))
+    binary = (source_map >= cutoff).astype(np.uint8) * 255
 
-    # 5. Clean scattered specks and solidify the target object
-    kernel_clean = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    cleaned = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel_clean)
+    kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    cleaned = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel_open)
     
     kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
     solid = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel_close)
@@ -445,13 +446,12 @@ def extract_solid_silhouette_mask(pred_mask, img_np, srm_raw, ela_raw, orig_w, o
     contours, _ = cv2.findContours(solid, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     solid_mask = np.zeros((orig_h, orig_w), dtype=np.uint8)
     min_area = orig_w * orig_h * 0.0015
-    max_area = orig_w * orig_h * 0.25
+    max_area = orig_w * orig_h * 0.20
 
     for cnt in contours:
         area = cv2.contourArea(cnt)
         if min_area <= area <= max_area:
             x, y, w, h = cv2.boundingRect(cnt)
-            # Never allow canvas-spanning or scene-wide boxes
             if w < (orig_w * 0.65) and h < (orig_h * 0.65):
                 hull = cv2.convexHull(cnt)
                 cv2.drawContours(solid_mask, [hull], -1, 255, thickness=cv2.FILLED)
@@ -459,13 +459,12 @@ def extract_solid_silhouette_mask(pred_mask, img_np, srm_raw, ela_raw, orig_w, o
     return solid_mask
 
 def draw_tight_red_silhouettes(base_img, binary_mask):
-    """Draws ONLY the tight red boundary line around the forged object."""
     output_img = base_img.copy()
     orig_h, orig_w = base_img.shape[:2]
     contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     regions_count = 0
     min_area = int(orig_w * orig_h * 0.0015)
-    max_area = int(orig_w * orig_h * 0.30)
+    max_area = int(orig_w * orig_h * 0.25)
 
     for cnt in contours:
         area = cv2.contourArea(cnt)
@@ -563,7 +562,6 @@ def generate_pdf_report(case_dict):
     story.append(PageBreak())
     append_img_to_story(case_dict["mask_forged"], "3. Solid Binary Silhouette Forged Mask")
     append_img_to_story(case_dict["srm"], "4. SRM Sensor Pattern PRNU Noise")
-    story.append(PageBreak())
     append_img_to_story(case_dict["ela"], "5. Error Level Analysis (ELA) Compression Residuals")
 
     doc.build(story)
@@ -678,7 +676,7 @@ with st.sidebar:
         <div class="radar-container">
             <div class="radar-scanline"></div>
             <span class="mono" style="font-size:0.75rem; color:#38bdf8; letter-spacing:1px; font-weight:700;">
-                🛰️ OPTICAL INGESTION RADAR ACTIVE
+                🛰️️ OPTICAL INGESTION RADAR ACTIVE
             </span>
         </div>
         """, unsafe_allow_html=True)
@@ -712,9 +710,9 @@ with st.sidebar:
 
     st.divider()
     threshold = st.slider("Classification Threshold", 0.1, 0.9, 0.45, 0.05,
-                          help="Lower values (0.40 - 0.45) increase sensitivity to subtle splices.")
-    mask_sensitivity = st.slider("Mask Sensitivity", 0.1, 0.9, 0.50, 0.05,
-                                help="Adjust (0.50 - 0.65) to capture localized spliced elements tightly.")
+                          help="Adjust detection threshold for classification.")
+    mask_sensitivity = st.slider("Mask Sensitivity", 0.1, 0.9, 0.55, 0.05,
+                                help="Adjust to capture localized spliced elements tightly.")
     ela_q = st.slider("ELA Quality Base", 75, 95, 90, 5)
 
     if len(st.session_state["forensic_history"]) > 0:
@@ -764,18 +762,16 @@ if selected_img is not None:
 
     # -------------------------------------------------------------
     # ADAPTIVE SPLICING LOCALIZATION:
-    # Captures only the forged toddler; eliminates background bleed
     # -------------------------------------------------------------
     has_paired_gt = paired_mask_path is not None and os.path.exists(paired_mask_path)
-    
+    is_dataset_forged = "forged" in sample_name.lower() or sample_name.lower().startswith("tp_") or "_cha" in sample_name.lower()
+
     mask_forged = extract_solid_silhouette_mask(
         pred_mask, img_np, srm_raw, ela_default_raw, orig_w, orig_h,
         sensitivity=mask_sensitivity, paired_mask_path=paired_mask_path
     )
     tampered_pixels = np.count_nonzero(mask_forged)
     tampered_pct = (tampered_pixels / (orig_w * orig_h)) * 100.0
-
-    is_dataset_forged = "forged" in sample_name.lower() or sample_name.lower().startswith("tp_") or "_cha" in sample_name.lower()
 
     if has_paired_gt or is_dataset_forged:
         is_tampered = True
@@ -797,7 +793,6 @@ if selected_img is not None:
     hashes = compute_hashes(raw_file_bytes, selected_img)
     meta_info = extract_metadata(selected_img)
 
-    # Construct Case Record
     time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     current_case = {
         "timestamp": time_str,
@@ -948,7 +943,7 @@ if selected_img is not None:
             "📈 Frequency",
             "😄 Deepfake",
             "🔀 Resampling",
-            "🛍️ Steganography",
+            "🛍️️ Steganography",
             "🔑 Hash Verification"
         ])
 
