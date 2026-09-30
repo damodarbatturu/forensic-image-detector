@@ -428,6 +428,9 @@ def compute_luminance_gradient(img_np):
     inferno = cv2.applyColorMap(mag_norm, cv2.COLORMAP_INFERNO)
     return cv2.cvtColor(inferno, cv2.COLOR_BGR2RGB)
 
+# ------------------------------------------------------------
+# STRICT FOCAL OBJECT LOCALIZATION (NO WHOLE-FRAME BOXES)
+# ------------------------------------------------------------
 def extract_solid_silhouette_mask(pred_mask, srm_raw, ela_raw, orig_w, orig_h, sensitivity=0.50, paired_mask_path=None):
     if paired_mask_path and os.path.exists(paired_mask_path):
         gt = cv2.imread(paired_mask_path, cv2.IMREAD_GRAYSCALE)
@@ -443,55 +446,68 @@ def extract_solid_silhouette_mask(pred_mask, srm_raw, ela_raw, orig_w, orig_h, s
     if len(ela_raw.shape) == 3:
         ela_raw = cv2.cvtColor(ela_raw.astype(np.uint8), cv2.COLOR_RGB2GRAY)
 
+    # 1. Isolate high-confidence neural probability peaks
     n_norm = cv2.normalize(pred_mask.astype(np.float32), None, 0.0, 1.0, cv2.NORM_MINMAX)
-    s_norm = cv2.normalize(cv2.resize(srm_raw.astype(np.float32), (orig_w, orig_h)), None, 0.0, 1.0, cv2.NORM_MINMAX)
-    e_norm = cv2.normalize(cv2.resize(ela_raw.astype(np.float32), (orig_w, orig_h)), None, 0.0, 1.0, cv2.NORM_MINMAX)
+    
+    # Exclude 5% outer canvas border to completely stop edge boundary wrapping
+    border_y = max(10, int(orig_h * 0.05))
+    border_x = max(10, int(orig_w * 0.05))
+    n_map = n_norm.copy()
+    n_map[:border_y, :] = 0.0
+    n_map[-border_y:, :] = 0.0
+    n_map[:, :border_x] = 0.0
+    n_map[:, -border_x:] = 0.0
 
-    fusion = (n_norm * 0.50) + (s_norm * 0.25) + (e_norm * 0.25)
-    fusion_u8 = cv2.normalize(fusion, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    # 2. Strict thresholding: only capture distinct focal peaks (the spliced object)
+    thresh = float(np.clip(0.72 - (sensitivity * 0.25), 0.40, 0.85))
+    _, binary = cv2.threshold(n_map, thresh, 1.0, cv2.THRESH_BINARY)
+    binary_u8 = (binary * 255).astype(np.uint8)
 
-    blur = cv2.GaussianBlur(fusion_u8, (7, 7), 0)
-    thresh_val = int(np.percentile(blur, max(40, int(100 - (sensitivity * 50)))))
-    _, binary = cv2.threshold(blur, thresh_val, 255, cv2.THRESH_BINARY)
+    # 3. Morphological cleanup: remove background noise speckles
+    kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    cleaned = cv2.morphologyEx(binary_u8, cv2.MORPH_OPEN, kernel_open)
+    
+    kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    solid = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel_close)
 
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (21, 21))
-    closed = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
-    closed = cv2.morphologyEx(closed, cv2.MORPH_DILATE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
-
-    contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # 4. Strict contour sizing: object must be between 0.3% and 18% of total area
+    contours, _ = cv2.findContours(solid, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     solid_mask = np.zeros((orig_h, orig_w), dtype=np.uint8)
+    min_area = orig_w * orig_h * 0.003
+    max_area = orig_w * orig_h * 0.18
 
-    if contours:
-        contours = sorted(contours, key=cv2.contourArea, reverse=True)
-        primary_contours = [c for c in contours if cv2.contourArea(c) > (orig_w * orig_h * 0.001)]
-        if not primary_contours:
-            primary_contours = [contours[0]]
-
-        for cnt in primary_contours:
-            hull = cv2.convexHull(cnt)
-            cv2.drawContours(solid_mask, [hull], -1, 255, thickness=cv2.FILLED)
-    else:
-        cutoff = np.percentile(fusion_u8, 92)
-        solid_mask = (fusion_u8 >= cutoff).astype(np.uint8) * 255
+    for cnt in contours:
+        area = cv2.contourArea(cnt)
+        if min_area <= area <= max_area:
+            x, y, w, h = cv2.boundingRect(cnt)
+            # Never allow full-frame or background canvas boxes
+            if w < (orig_w * 0.55) and h < (orig_h * 0.55):
+                hull = cv2.convexHull(cnt)
+                cv2.drawContours(solid_mask, [hull], -1, 255, thickness=cv2.FILLED)
 
     return solid_mask
 
 def draw_red_bounding_boxes(base_img, binary_mask):
+    """Draws ONLY localized tight bounding boxes around the true forged object."""
     output_img = base_img.copy()
+    orig_h, orig_w = base_img.shape[:2]
     contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     box_count = 0
-    min_area = max(80, int(base_img.shape[0] * base_img.shape[1] * 0.0003))
+    min_area = int(orig_w * orig_h * 0.003)
+    max_area = int(orig_w * orig_h * 0.20)
 
     for cnt in contours:
-        if cv2.contourArea(cnt) > min_area:
+        area = cv2.contourArea(cnt)
+        if min_area <= area <= max_area:
             x, y, w, h = cv2.boundingRect(cnt)
-            cv2.rectangle(output_img, (x, y), (x + w, y + h), (255, 0, 0), 3)
-            label = "FORGED REGION"
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            (tw, th), _ = cv2.getTextSize(label, font, 0.5, 1)
-            cv2.rectangle(output_img, (x, max(0, y - th - 8)), (x + tw + 8, y), (255, 0, 0), -1)
-            cv2.putText(output_img, label, (x + 4, max(th + 2, y - 4)), font, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
-            box_count += 1
+            if w < (orig_w * 0.55) and h < (orig_h * 0.55):
+                cv2.rectangle(output_img, (x, y), (x + w, y + h), (255, 0, 0), 3)
+                label = "FORGED REGION"
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                (tw, th), _ = cv2.getTextSize(label, font, 0.5, 1)
+                cv2.rectangle(output_img, (x, max(0, y - th - 8)), (x + tw + 8, y), (255, 0, 0), -1)
+                cv2.putText(output_img, label, (x + 4, max(th + 2, y - 4)), font, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+                box_count += 1
 
     return output_img, box_count
 
@@ -629,7 +645,7 @@ with st.sidebar:
     st.markdown("""
     <div class="sidebar-header-card">
         <div style="font-size:1.15rem; font-weight:800; color:#f8fafc; display:flex; align-items:center; gap:8px;">
-            <span class="pulsing-shield">🛡️️</span> Multi-Spectral Forensics
+            <span class="pulsing-shield">🛡️</span> Multi-Spectral Forensics
         </div>
         <div style="font-size:0.75rem; color:#94a3b8; margin-top:4px;">
             Deep Learning + 12 Diagnostic Parameters
@@ -999,7 +1015,7 @@ if selected_img is not None:
             st.markdown("#### 👻 4. Noise Analysis & JPEG Ghost Detection")
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
-                st.markdown('<div class="param-card"><b>⚙️ Noise & Ghost Controls</b></div>', unsafe_allow_html=True)
+                st.markdown('<div class="param-card"><b>⚙️️ Noise & Ghost Controls</b></div>', unsafe_allow_html=True)
                 ghost_q = st.select_slider("Ghost Quality Step", options=[70, 75, 80, 85, 90, 95], value=85, key="ghost_tab_q")
                 run_ghost = st.button("🚀 Detect JPEG Ghost & Noise", key="btn_run_ghost", use_container_width=True)
             with col_r:
@@ -1050,7 +1066,7 @@ if selected_img is not None:
                     cmfd_vis, cmfd_matches = compute_cmfd_keypoints(img_np, min_dist=cmfd_dist)
                     st.image(cmfd_vis, caption="ORB Feature Vector Duplication Map", use_container_width=True)
                     if cmfd_matches > 5:
-                        st.warning(f"⚠️ {cmfd_matches} Suspicious duplicate vectors detected across non-adjacent regions.")
+                        st.warning(f"⚠️️ {cmfd_matches} Suspicious duplicate vectors detected across non-adjacent regions.")
                     else:
                         st.success("✅ Minimal inter-cluster duplicate vectors detected.")
                 else:
