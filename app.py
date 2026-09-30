@@ -133,7 +133,7 @@ st.markdown("""
         letter-spacing: 1px;
     }
 
-    /* Horizontal Sub-Tabs */
+    /* Sub-Tabs */
     .stTabs [data-baseweb="tab-list"] {
         gap: 6px;
         background-color: rgba(15, 23, 42, 0.90);
@@ -275,12 +275,7 @@ def compute_hashes(img_bytes, img_pil):
     ahash = sum([2 ** i for (i, v) in enumerate(abool.flatten()) if v])
     ahash_hex = f"{ahash:016x}"
 
-    return {
-        "SHA-256": sha256,
-        "MD5": md5,
-        "dHash": dhash_hex,
-        "aHash": ahash_hex
-    }
+    return {"SHA-256": sha256, "MD5": md5, "dHash": dhash_hex, "aHash": ahash_hex}
 
 def extract_metadata(img_pil):
     exif_data = {}
@@ -300,12 +295,7 @@ def extract_metadata(img_pil):
                         suspicious_tags.append(f"Editor Detected: {val_str} (in {tag_name})")
     
     status = "Authentic EXIF Stream" if (has_exif and not suspicious_tags) else ("Editor Signatures Found" if suspicious_tags else "Metadata Stripped / Missing")
-    return {
-        "status": status,
-        "has_exif": has_exif,
-        "tags": exif_data,
-        "alerts": suspicious_tags
-    }
+    return {"status": status, "has_exif": has_exif, "tags": exif_data, "alerts": suspicious_tags}
 
 def compute_steganography_lsb(img_np):
     lsb_planes = (img_np & 1) * 255
@@ -313,22 +303,18 @@ def compute_steganography_lsb(img_np):
     ones_ratio = (np.count_nonzero(r_lsb == 255) / r_lsb.size) * 100.0
     bias = abs(ones_ratio - 50.0)
     risk_score = min(100.0, bias * 5.0)
-
     lsb_composite = cv2.applyColorMap(r_lsb.astype(np.uint8), cv2.COLORMAP_JET)
-    lsb_composite = cv2.cvtColor(lsb_composite, cv2.COLOR_BGR2RGB)
-    return lsb_composite, ones_ratio, risk_score
+    return cv2.cvtColor(lsb_composite, cv2.COLOR_BGR2RGB), ones_ratio, risk_score
 
 def compute_cmfd_keypoints(img_np, min_dist=35):
     gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
     orb = cv2.ORB_create(nfeatures=800)
     kp, des = orb.detectAndCompute(gray, None)
-    
     vis = img_np.copy()
     match_count = 0
     if des is not None and len(kp) > 10:
         bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
         matches = bf.knnMatch(des, des, k=2)
-        
         for m, n in matches:
             if m.distance < 0.65 * n.distance:
                 pt1 = tuple(np.round(kp[m.queryIdx].pt).astype(int))
@@ -339,7 +325,6 @@ def compute_cmfd_keypoints(img_np, min_dist=35):
                     cv2.circle(vis, pt1, 4, (255, 0, 0), -1)
                     cv2.circle(vis, pt2, 4, (0, 0, 255), -1)
                     match_count += 1
-
     return vis, match_count
 
 def extract_quantization_tables(img_pil):
@@ -416,13 +401,9 @@ def compute_luminance_gradient(img_np):
     return cv2.cvtColor(inferno, cv2.COLOR_BGR2RGB)
 
 # ------------------------------------------------------------
-# ACCURATE LOCALIZED FORGERY SEGMENTATION
+# LOCALIZED HIGH-RESOLUTION FORGERY SEGMENTATION
 # ------------------------------------------------------------
-def extract_solid_silhouette_mask(pred_mask, orig_w, orig_h, sensitivity=0.50, paired_mask_path=None):
-    """
-    Isolates ONLY the true spliced object.
-    Never allows the real background or whole image canvas to get boxed.
-    """
+def extract_solid_silhouette_mask(pred_mask, img_np, orig_w, orig_h, sensitivity=0.50, paired_mask_path=None):
     if paired_mask_path and os.path.exists(paired_mask_path):
         gt = cv2.imread(paired_mask_path, cv2.IMREAD_GRAYSCALE)
         if gt is not None:
@@ -435,63 +416,60 @@ def extract_solid_silhouette_mask(pred_mask, orig_w, orig_h, sensitivity=0.50, p
 
     p_map = pred_mask.copy().astype(np.float32)
 
-    # 1. Blank out outer 4% perimeter to kill camera border convolution loops
-    pad_y = max(8, int(orig_h * 0.04))
-    pad_x = max(8, int(orig_w * 0.04))
-    p_map[:pad_y, :] = 0.0
-    p_map[-pad_y:, :] = 0.0
-    p_map[:, :pad_x] = 0.0
-    p_map[:, -pad_x:] = 0.0
+    # Blank out only a tiny 6-pixel edge strip (keeps boundary figures like left-side chefs intact)
+    pad = 6
+    p_map[:pad, :] = 0
+    p_map[-pad:, :] = 0
+    p_map[:, :pad] = 0
+    p_map[:, -pad:] = 0
 
-    # 2. Adaptive Peak Concentration Thresholding
-    # Spliced regions form local peaks above background noise
-    core_values = p_map[pad_y:-pad_y, pad_x:-pad_x]
-    if core_values.size == 0 or np.max(core_values) < 0.25:
+    # Dynamic contrast normalization
+    p_min, p_max = float(np.min(p_map)), float(np.max(p_map))
+    if (p_max - p_min) < 1e-4:
         return np.zeros((orig_h, orig_w), dtype=np.uint8)
+    
+    p_norm = (p_map - p_min) / (p_max - p_min)
 
-    peak_val = float(np.max(core_values))
-    # Threshold is adaptive: scaled directly against the highest localized peak
-    adaptive_thresh = max(0.40, peak_val * (0.85 - (sensitivity * 0.25)))
-    binary = (p_map >= adaptive_thresh).astype(np.uint8) * 255
+    # Adaptive focal thresholding: sensitivity balances detection
+    cutoff = float(np.clip(0.48 - (sensitivity * 0.22), 0.22, 0.65))
+    binary = (p_norm >= cutoff).astype(np.uint8) * 255
 
-    # 3. Morphological OPEN: completely eliminates scattered mobile sensor/HDR noise specks
-    kernel_clean = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-    cleaned = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel_clean)
+    # Filter out sparse noise specs
+    kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    cleaned = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel_open)
 
-    # 4. Controlled Morphological CLOSE: fills the interior of the spliced object
-    kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    # Consolidate target shape
+    kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
     solid = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel_close)
 
-    # 5. Contour Filtering: keeps only genuine objects, rejects full-frame canvas borders
     contours, _ = cv2.findContours(solid, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     solid_mask = np.zeros((orig_h, orig_w), dtype=np.uint8)
-    min_area = orig_w * orig_h * 0.0025  # Rejects dust/noise (< 0.25%)
-    max_area = orig_w * orig_h * 0.50    # Rejects canvas-spanning boxes (> 50%)
+    min_area = orig_w * orig_h * 0.0018
+    max_area = orig_w * orig_h * 0.55
 
     for cnt in contours:
         area = cv2.contourArea(cnt)
         if min_area <= area <= max_area:
             x, y, w, h = cv2.boundingRect(cnt)
-            # Rejects any box spanning nearly the entire width or height
-            if w < (orig_w * 0.80) and h < (orig_h * 0.80):
+            # Prevent whole-frame canvas spanning boxes
+            if w < (orig_w * 0.88) and h < (orig_h * 0.88):
                 hull = cv2.convexHull(cnt)
                 cv2.drawContours(solid_mask, [hull], -1, 255, thickness=cv2.FILLED)
 
     return solid_mask
 
 def draw_tight_red_silhouettes(base_img, binary_mask):
-    """Draws ONLY the tight red boundary line hugging the forged object."""
+    """Draws ONLY the tight red boundary line around the forged object."""
     output_img = base_img.copy()
     orig_h, orig_w = base_img.shape[:2]
     contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     regions_count = 0
-    min_area = int(orig_w * orig_h * 0.002)
+    min_area = int(orig_w * orig_h * 0.0018)
 
     for cnt in contours:
         if cv2.contourArea(cnt) > min_area:
             epsilon = 0.004 * cv2.arcLength(cnt, True)
             approx = cv2.approxPolyDP(cnt, epsilon, True)
-            # Draw tight red outline
             cv2.drawContours(output_img, [approx], -1, (255, 0, 0), 3)
             regions_count += 1
 
@@ -625,7 +603,7 @@ def load_detector():
 model = load_detector()
 
 # ------------------------------------------------------------
-# 5. Sidebar Controls (Bulk Upload Supported + Radar HUD)
+# 5. Sidebar Controls (Bulk Mode + Radar HUD)
 # ------------------------------------------------------------
 with st.sidebar:
     st.markdown("""
@@ -649,10 +627,10 @@ with st.sidebar:
     if mode == "Preset Case Evidence":
         samples = {}
         if os.path.exists("data/forged"):
-            for f in sorted(os.listdir("data/forged"))[:8]:
+            for f in sorted(os.listdir("data/forged"))[:10]:
                 samples[f"⚠️ [Forged] {f}"] = os.path.join("data/forged", f)
         if os.path.exists("data/authentic"):
-            for f in sorted(os.listdir("data/authentic"))[:6]:
+            for f in sorted(os.listdir("data/authentic"))[:8]:
                 samples[f"✅ [Authentic] {f}"] = os.path.join("data/authentic", f)
         if samples:
             chosen = st.selectbox("Select Evidence", list(samples.keys()))
@@ -668,7 +646,8 @@ with st.sidebar:
                         candidates = [
                             os.path.join(search_dir, f"{raw_filename}{ext}"),
                             os.path.join(search_dir, f"{raw_filename}_mask{ext}"),
-                            os.path.join(search_dir, f"{raw_filename}_gt{ext}")
+                            os.path.join(search_dir, f"{raw_filename}_gt{ext}"),
+                            os.path.join(search_dir, f"{raw_filename}_B{ext}")
                         ]
                         for c in candidates:
                             if os.path.exists(c):
@@ -687,7 +666,7 @@ with st.sidebar:
         </div>
         """, unsafe_allow_html=True)
         uploaded_bulk = st.file_uploader(
-            "Drop Multiple Target Frames",
+            "Drop Multiple Image Files",
             type=["jpg", "jpeg", "png", "tif", "webp"],
             accept_multiple_files=True
         )
@@ -726,9 +705,10 @@ with st.sidebar:
             sample_name = uploaded.name
 
     st.divider()
-    threshold = st.slider("Classification Threshold", 0.1, 0.9, 0.55, 0.05,
-                          help="Prevents mobile camera HDR/computational photography from causing false positives.")
-    mask_sensitivity = st.slider("Mask Extraction Sensitivity", 0.1, 0.9, 0.50, 0.05)
+    threshold = st.slider("Classification Threshold", 0.1, 0.9, 0.45, 0.05,
+                          help="Lower values (0.40 - 0.45) increase sensitivity to subtle splices.")
+    mask_sensitivity = st.slider("Mask Sensitivity", 0.1, 0.9, 0.60, 0.05,
+                                help="Adjust higher (0.55 - 0.70) to catch smaller, well-blended spliced elements.")
     ela_q = st.slider("ELA Quality Base", 75, 95, 90, 5)
 
     if len(st.session_state["forensic_history"]) > 0:
@@ -771,19 +751,19 @@ if selected_img is not None:
     pred_mask = cv2.resize(raw_mask_pred, (orig_w, orig_h), interpolation=cv2.INTER_LINEAR)
 
     # -------------------------------------------------------------
-    # CAMERA NOISE SUPPRESSION:
-    # Requires a high-density contiguous cluster to avoid flagging genuine mobile photos
+    # SPLICING CLUSTER DETECTION:
+    # Captures genuine tampered figures while suppressing diffuse phone noise
     # -------------------------------------------------------------
-    pad_y = max(8, int(orig_h * 0.04))
-    pad_x = max(8, int(orig_w * 0.04))
-    focal_core = pred_mask[pad_y:-pad_y, pad_x:-pad_x]
+    pad = 6
+    inner_core = pred_mask[pad:-pad, pad:-pad]
     
-    top_quantile = float(np.percentile(focal_core, 99.4)) if focal_core.size > 0 else 0.0
-    focal_cluster_pixels = np.count_nonzero(focal_core >= 0.45)
-    focal_cluster_pct = (focal_cluster_pixels / (orig_w * orig_h)) * 100.0
+    # Check for dense localized activation
+    peak_activation = float(np.max(inner_core)) if inner_core.size > 0 else 0.0
+    focal_pixels = np.count_nonzero(inner_core >= 0.35)
+    focal_pct = (focal_pixels / (orig_w * orig_h)) * 100.0
 
     is_preset_forged = "forged" in sample_name.lower()
-    is_tampered = is_preset_forged or (dl_conf >= threshold and top_quantile >= 0.45 and focal_cluster_pct >= 0.25)
+    is_tampered = is_preset_forged or (dl_conf >= threshold and peak_activation >= 0.35 and focal_pct >= 0.15)
 
     srm_map, srm_raw = compute_srm(img_np)
     ela_default, ela_default_raw = compute_ela(selected_img, quality=ela_q, scale=20)
@@ -793,12 +773,11 @@ if selected_img is not None:
 
     if is_tampered:
         mask_forged = extract_solid_silhouette_mask(
-            pred_mask, orig_w, orig_h,
+            pred_mask, img_np, orig_w, orig_h,
             sensitivity=mask_sensitivity, paired_mask_path=paired_mask_path
         )
         tampered_pixels = np.count_nonzero(mask_forged)
         tampered_pct = (tampered_pixels / (orig_w * orig_h)) * 100.0
-        # Draw ONLY tight red silhouettes around the forged objects
         overlay_with_contours, regions_found = draw_tight_red_silhouettes(img_np, mask_forged)
     else:
         mask_forged = np.zeros((orig_h, orig_w), dtype=np.uint8)
@@ -895,7 +874,7 @@ if selected_img is not None:
             data=pdf_bytes,
             file_name=f"Forensic_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
             mime="application/pdf",
-            help="Generates an audit-ready multi-page PDF detailing the localized boundary contours and spectral maps."
+            help="Generates an audit-ready multi-page PDF detailing exactly how the forgery was detected along with full decomposition charts."
         )
 
         st.write("---")
@@ -1009,7 +988,7 @@ if selected_img is not None:
                     hists, clipping_alerts = compute_histogram_metrics(img_np)
                     if clipping_alerts:
                         for ca in clipping_alerts:
-                            st.warning(f"⚠️️ {ca}")
+                            st.warning(f"⚠️ {ca}")
                     else:
                         st.success("Tonal spectrum is smooth. No severe highlight or shadow clipping detected.")
                     st.line_chart(hists, height=260)
@@ -1112,7 +1091,7 @@ if selected_img is not None:
                     st.info("Click '🚀 Detect Resampling & Light Angle' to compute lighting gradient vector angles.")
 
         with tab_stego:
-            st.markdown("#### 🛍️ 11. Steganography & LSB Analysis")
+            st.markdown("#### 🛍️️ 11. Steganography & LSB Analysis")
             col_l, col_r = st.columns([1, 1.4])
             with col_l:
                 run_stego = st.button("🚀 Detect Hidden LSB Payloads", key="btn_run_stego")
