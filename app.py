@@ -601,13 +601,11 @@ if selected_img is not None:
     ela_anomaly = np.std(ela_default_raw)
     pixel_variance = np.var(pixel_diff_map)
 
-    # High thresholds to completely ignore natural mobile camera noise & lens grain
     is_neural_flagged = dl_conf >= threshold
     is_ela_flagged = ela_anomaly >= 22.0
     is_cmaf_flagged = cmaf_matches >= 4
     is_pixel_flagged = pixel_variance > 3500.0
 
-    # Explicit benchmark dataset prefix parsing
     is_benchmark_forged = (
         ("forged" in sample_name.lower()) or 
         sample_name.lower().startswith("tp_") or 
@@ -625,8 +623,6 @@ if selected_img is not None:
     elif is_benchmark_forged:
         is_tampered = True
     else:
-        # For outside custom uploads (mobile camera / digital photos):
-        # Must have extreme multi-signal anomaly agreement to be flagged as tampered
         consensus_count = sum([is_neural_flagged, is_ela_flagged, is_cmaf_flagged, is_pixel_flagged])
         is_tampered = consensus_count >= 3
 
@@ -681,29 +677,36 @@ if selected_img is not None:
             st.session_state["last_analyzed_name"] = sample_name
 
         st.write("---")
-        s1, s2, s3 = st.columns(3)
-        with s1:
+        # Display Input Image side-by-side with the Integrity Verdict Badge & Metrics
+        inp_col1, inp_col2 = st.columns([1, 1])
+        with inp_col1:
+            st.markdown("##### 📁 Input Image Preview")
+            st.image(selected_img, use_container_width=True, caption=f"Uploaded Evidence: {sample_name} ({orig_w}x{orig_h}px)")
+        with inp_col2:
+            st.markdown("##### 🔍 Forensic Verdict & Summary")
             if is_tampered:
                 st.markdown('<div class="badge-forged">INTEGRITY COMPROMISED (TAMPER DETECTED)</div>', unsafe_allow_html=True)
             else:
                 st.markdown('<div class="badge-authentic">AUTHENTIC / ORIGINAL STREAM</div>', unsafe_allow_html=True)
-        with s2:
-            st.metric("Multi-Modal Confidence", f"{consensus_confidence}%")
-        with s3:
-            st.metric("CMAF Vector Matches", f"{cmaf_matches} Found")
+            st.write("")
+            m1, m2 = st.columns(2)
+            with m1:
+                st.metric("Confidence", f"{consensus_confidence}%")
+            with m2:
+                st.metric("CMAF Vectors", f"{cmaf_matches} Found")
 
-        st.write("")
-        pdf_bytes = generate_pdf_report(current_case)
-        st.download_button(
-            label="📥 Download Audit Compliance PDF Report",
-            data=pdf_bytes,
-            file_name=f"Forensic_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-            mime="application/pdf"
-        )
+            st.write("")
+            pdf_bytes = generate_pdf_report(current_case)
+            st.download_button(
+                label="📥 Download Audit Compliance PDF Report",
+                data=pdf_bytes,
+                file_name=f"Forensic_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                mime="application/pdf"
+            )
 
         st.write("---")
-        st.subheader("🖼️ Multi-Spectral Inspector (On-Demand Execution & Step-by-Step Pipeline)")
-        st.caption("Click any custom technique button below to view its processing steps, trigger the HUD scan animation, and render results on demand.")
+        st.subheader("🖼️ Multi-Spectral Inspector (On-Demand Execution with Step-by-Step Pipeline)")
+        st.caption("Click any custom technique button below to view its processing steps, trigger the HUD scan animation, and render results at input image size on demand.")
 
         # Side-by-side custom buttons for the 4 key techniques
         col_b1, col_b2, col_b3, col_b4 = st.columns(4)
@@ -746,7 +749,7 @@ if selected_img is not None:
                 4. <b>Thermal Pseudocoloring:</b> Applies JET colormap to highlight micro-alterations and splicing seams.
             </div>
             """, unsafe_allow_html=True)
-            st.image(pixel_diff_map, caption="Pixel Difference Thermal Heatmap Results", use_container_width=True)
+            st.image(pixel_diff_map, caption="Pixel Difference Thermal Heatmap Results (Input Size Match)", use_container_width=True)
             st.success("✅ Pixel comparison completed successfully. High-intensity thermal areas indicate micro-variances.")
 
         elif st.session_state["active_insp"] == "qual":
@@ -765,7 +768,7 @@ if selected_img is not None:
                 4. <b>MAGMA Visualization:</b> Renders compression artifacts and multi-save grid seams.
             </div>
             """, unsafe_allow_html=True)
-            st.image(quality_map, caption="Compression Quality & Blocking Variance Map", use_container_width=True)
+            st.image(quality_map, caption="Compression Quality & Blocking Variance Map (Input Size Match)", use_container_width=True)
             st.success("✅ Quality blocking map computed successfully. Mismatched quantization grids expose spliced regions.")
 
         elif st.session_state["active_insp"] == "srm":
@@ -784,7 +787,7 @@ if selected_img is not None:
                 4. <b>BONE Pseudocoloring:</b> Visualizes noise consistency across spatial plane.
             </div>
             """, unsafe_allow_html=True)
-            st.image(srm_map, caption="SRM High-Pass Sensor Noise Residuals", use_container_width=True)
+            st.image(srm_map, caption="SRM High-Pass Sensor Noise Residuals (Input Size Match)", use_container_width=True)
             st.success("✅ SRM noise extraction completed. Abrupt noise cuts indicate foreign objects pasted from different cameras.")
 
         elif st.session_state["active_insp"] == "ela":
@@ -803,7 +806,7 @@ if selected_img is not None:
                 4. <b>Residual Evaluation:</b> Highlights areas with different compression histories or high error energy.
             </div>
             """, unsafe_allow_html=True)
-            st.image(ela_default, caption=f"Error Level Analysis (ELA) at Q={ela_q}", use_container_width=True)
+            st.image(ela_default, caption=f"Error Level Analysis (ELA) at Q={ela_q} (Input Size Match)", use_container_width=True)
             st.success("✅ ELA analysis completed successfully. Discrepancies in error brightness reveal manipulated regions.")
 
         else:
@@ -853,7 +856,7 @@ if selected_img is not None:
 
         with t_meta:
             st.markdown("#### EXIF Metadata Headers")
-            st.write("Inspects header tags for editing software signatures.")
+            st.write("Inspect header tags for editing software signatures.")
             if st.button("🚀 Audit EXIF Metadata", key="btn_meta", use_container_width=True):
                 st.metric("Status", meta_info["status"])
                 if meta_info["tags"]:
