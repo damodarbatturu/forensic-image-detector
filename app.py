@@ -308,43 +308,39 @@ def extract_metadata(img_pil):
     status = "Authentic EXIF Stream" if (has_exif and not suspicious_tags) else ("Editor Signatures Found" if suspicious_tags else "Metadata Stripped / Missing")
     return {"status": status, "has_exif": has_exif, "tags": exif_data, "alerts": suspicious_tags}
 
-def compute_srm(img_np):
-    """Spatial Rich Model (SRM) High-Pass Noise Residuals"""
+def compute_srm_steps(img_np):
+    gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
     kernel = np.array([[-1, 2, -2, 2, -1],
                        [ 2, -6, 8, -6,  2],
                        [-2, 8, -12, 8, -2],
                        [ 2, -6, 8, -6,  2],
                        [-1, 2, -2, 2, -1]], dtype=np.float32) / 4.0
-    gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
     filtered = cv2.filter2D(gray, -1, kernel)
-    bone = cv2.applyColorMap(np.clip(np.abs(filtered) * 4, 0, 255).astype(np.uint8), cv2.COLORMAP_BONE)
-    return cv2.cvtColor(bone, cv2.COLOR_BGR2RGB), np.abs(filtered)
+    noise_extracted = np.clip(np.abs(filtered) * 4, 0, 255).astype(np.uint8)
+    bone = cv2.applyColorMap(noise_extracted, cv2.COLORMAP_BONE)
+    return gray, noise_extracted, cv2.cvtColor(bone, cv2.COLOR_BGR2RGB), np.abs(filtered)
 
-def compute_ela(image_pil, quality=90, scale=20):
-    """Error Level Analysis (ELA)"""
+def compute_ela_steps(image_pil, quality=90, scale=20):
     temp_file = "temp_ela.jpg"
     image_pil.save(temp_file, "JPEG", quality=int(quality))
     resaved = Image.open(temp_file)
     diff = ImageChops.difference(image_pil, resaved)
-    extrema = diff.getextrema()
-    max_diff = max([ex[1] for ex in extrema]) if extrema else 1
-    diff = ImageEnhance.Brightness(diff).enhance(scale)
+    diff_raw_np = np.array(diff)
+    diff_enhanced = ImageEnhance.Brightness(diff).enhance(scale)
     if os.path.exists(temp_file):
         os.remove(temp_file)
-    diff_np = np.array(diff)
-    return diff_np, cv2.cvtColor(diff_np, cv2.COLOR_RGB2GRAY)
+    diff_np = np.array(diff_enhanced)
+    return resaved, diff_raw_np, diff_np, cv2.cvtColor(diff_np, cv2.COLOR_RGB2GRAY)
 
-def compute_pixel_heatmap(img_np):
-    """Pixel Difference Thermal Heatmap"""
+def compute_pixel_heatmap_steps(img_np):
     gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
     smooth = cv2.bilateralFilter(gray, 9, 75, 75)
     diff = cv2.absdiff(gray, smooth)
     diff_norm = cv2.normalize(diff, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
     heatmap = cv2.applyColorMap(diff_norm, cv2.COLORMAP_JET)
-    return cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
+    return gray, smooth, diff_norm, cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
 
-def compute_quality_blocking_map(img_np):
-    """Compression Blocking & Quality DQT Map"""
+def compute_quality_blocking_steps(img_np):
     gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY).astype(np.float32)
     h, w = gray.shape
     block_map = np.zeros((h // 8 * 8, w // 8 * 8), dtype=np.float32)
@@ -353,7 +349,8 @@ def compute_quality_blocking_map(img_np):
             block = gray[y:y+8, x:x+8]
             block_map[y:y+8, x:x+8] = np.var(block)
     q_norm = cv2.normalize(block_map, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    return cv2.cvtColor(cv2.applyColorMap(q_norm, cv2.COLORMAP_MAGMA), cv2.COLOR_BGR2RGB)
+    heatmap = cv2.applyColorMap(q_norm, cv2.COLORMAP_MAGMA)
+    return gray, block_map, q_norm, cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
 
 def compute_lighting_shadow_map(img_np):
     hsv = cv2.cvtColor(img_np, cv2.COLOR_RGB2HSV)
@@ -422,7 +419,6 @@ def generate_pdf_report(case_dict):
         ["Parameter", "Observed Evaluation"],
         ["Integrity Verdict", case_dict["verdict"]],
         ["Multi-Modal Confidence", f"{case_dict['confidence']}%"],
-        ["CMAF Duplications", f"{case_dict['cmaf_matches']} Vectors"],
         ["SHA-256 Digest", case_dict.get("hashes", {}).get("SHA-256", "N/A")[:24] + "..."],
         ["Native Resolution", case_dict["resolution"]]
     ]
@@ -460,7 +456,7 @@ def generate_pdf_report(case_dict):
     append_img_to_story(case_dict["pixel_diff"], "2. Pixel Difference Heatmap")
     story.append(PageBreak())
     append_img_to_story(case_dict["quality_map"], "3. Image Quality & Compression Blocking Map")
-    append_img_to_story(case_dict["cmaf_vis"], "4. CMAF Keypoint Matcher")
+    append_img_to_story(case_dict["ela"], "4. Error Level Analysis (ELA)")
 
     doc.build(story)
     pdf_buffer.seek(0)
@@ -577,13 +573,13 @@ if selected_img is not None:
         raw_file_bytes = buf.getvalue()
 
     # Precompute all advanced test transforms
-    pixel_diff_map = compute_pixel_heatmap(img_np)
-    quality_map = compute_quality_blocking_map(img_np)
+    pix_gray, pix_smooth, pix_diff, pixel_diff_map = compute_pixel_heatmap_steps(img_np)
+    qual_gray, qual_block, qual_norm, quality_map = compute_quality_blocking_steps(img_np)
+    srm_gray, srm_noise, srm_map, srm_raw = compute_srm_steps(img_np)
+    ela_resaved, ela_diff_raw, ela_default, ela_default_raw = compute_ela_steps(selected_img, quality=ela_q, scale=20)
+    
     shadow_map = compute_lighting_shadow_map(img_np)
-    cmaf_vis, cmaf_matches = compute_cmaf_copy_move(img_np)
     lsb_vis, lsb_ratio, lsb_risk = compute_lsb_steganography(img_np)
-    srm_map, srm_raw = compute_srm(img_np)
-    ela_default, ela_default_raw = compute_ela(selected_img, quality=ela_q, scale=20)
     fft_map = compute_fft(img_np)
     edge_map = compute_edges(img_np)
 
@@ -603,7 +599,6 @@ if selected_img is not None:
 
     is_neural_flagged = dl_conf >= threshold
     is_ela_flagged = ela_anomaly >= 22.0
-    is_cmaf_flagged = cmaf_matches >= 4
     is_pixel_flagged = pixel_variance > 3500.0
 
     is_benchmark_forged = (
@@ -623,11 +618,11 @@ if selected_img is not None:
     elif is_benchmark_forged:
         is_tampered = True
     else:
-        consensus_count = sum([is_neural_flagged, is_ela_flagged, is_cmaf_flagged, is_pixel_flagged])
-        is_tampered = consensus_count >= 3
+        consensus_count = sum([is_neural_flagged, is_ela_flagged, is_pixel_flagged])
+        is_tampered = consensus_count >= 2
 
     if is_tampered:
-        consensus_confidence = round(float(np.clip(((dl_conf * 0.3) + (min(ela_anomaly, 40.0) / 40.0 * 0.3) + (min(cmaf_matches, 10) / 10.0 * 0.2) + (0.2 if is_pixel_flagged else 0.0)) * 100.0, 60.0, 99.4)), 1)
+        consensus_confidence = round(float(np.clip(((dl_conf * 0.4) + (min(ela_anomaly, 40.0) / 40.0 * 0.4) + (0.2 if is_pixel_flagged else 0.0)) * 100.0, 60.0, 99.4)), 1)
     else:
         consensus_confidence = round(float(np.clip(95.0 + ((1.0 - dl_conf) * 4.8), 92.0, 99.9)), 1)
 
@@ -639,14 +634,12 @@ if selected_img is not None:
         "name": sample_name,
         "verdict": "TAMPER DETECTED" if is_tampered else "AUTHENTIC",
         "confidence": consensus_confidence,
-        "cmaf_matches": cmaf_matches,
         "resolution": f"{orig_w} × {orig_h} px",
         "hashes": hashes,
         "meta_status": meta_info["status"],
         "original": selected_img,
         "pixel_diff": pixel_diff_map,
         "quality_map": quality_map,
-        "cmaf_vis": cmaf_vis,
         "srm": srm_map,
         "ela": ela_default,
         "fft": fft_map
@@ -668,7 +661,7 @@ if selected_img is not None:
             """, unsafe_allow_html=True)
             status_banner = st.empty()
             progress_bar = st.progress(0)
-            for pct, msg in [(30, "🛰️ Running Dual-Stream Neural & PRNU analysis..."), (70, "🔬 Computing CMAF keypoints & ELA compression..."), (100, "✅ Multi-modal verification complete.")]:
+            for pct, msg in [(30, "🛰️ Running Dual-Stream Neural & PRNU analysis..."), (70, "🔬 Computing ELA compression & spatial grids..."), (100, "✅ Multi-modal verification complete.")]:
                 status_banner.markdown(f"<span class='mono' style='color:#38bdf8;'>{msg}</span>", unsafe_allow_html=True)
                 progress_bar.progress(pct)
                 time.sleep(0.12)
@@ -702,7 +695,7 @@ if selected_img is not None:
 
         st.write("---")
         st.subheader("🖼️ Multi-Spectral Inspector (On-Demand Execution)")
-        st.caption("Click any technique button below to execute the algorithm and render results in a compact 1:1 square ratio (width=300). View its step-by-step pipeline using the dedicated toggles below the output.")
+        st.caption("Click any technique button below to execute the algorithm and render results in a compact 1:1 square ratio (width=300). The step-by-step intermediate images will be shown below the final output.")
 
         # Side-by-side custom buttons for the 4 key techniques
         col_b1, col_b2, col_b3, col_b4 = st.columns(4)
@@ -713,7 +706,7 @@ if selected_img is not None:
         with col_b3:
             btn_srm = st.button("📡 SRM Noise", use_container_width=True)
         with col_b4:
-            btn_ela = st.button("🕵️ Error Level (ELA)", use_container_width=True)
+            btn_ela = st.button("🕵 Error Level (ELA)", use_container_width=True)
 
         st.write("---")
 
@@ -736,20 +729,15 @@ if selected_img is not None:
                 <div class="laser-line"></div>
             </div>
             """, unsafe_allow_html=True)
-            st.image(pixel_diff_map, width=300, caption="Pixel Difference Thermal Heatmap (1:1 Ratio)", use_container_width=False)
+            st.image(pixel_diff_map, width=300, caption="Final Output: Pixel Difference Thermal Heatmap (1:1 Ratio)", use_container_width=False)
             st.success("✅ Pixel comparison completed successfully. High-intensity thermal areas indicate micro-variances.")
             
-            # Step-by-Step Toggle below output
-            if st.button("Show Processing Steps for Pixel Comparison"):
-                st.markdown("""
-                <div class="step-box">
-                    <b>Step-by-Step Processing Pipeline:</b><br>
-                    1. <b>Grayscale Conversion:</b> Converts RGB input frame into single-channel luminescence.<br>
-                    2. <b>Bilateral Smoothing:</b> Applies edge-preserving bilateral filtering to establish pristine reference baseline.<br>
-                    3. <b>Absolute Difference:</b> Computes pixel-wise deviation between raw input and smoothed baseline.<br>
-                    4. <b>Thermal Pseudocoloring:</b> Applies JET colormap to highlight micro-alterations and splicing seams.
-                </div>
-                """, unsafe_allow_html=True)
+            st.markdown("#### 1. Grayscale Conversion")
+            st.image(pix_gray, width=250, caption="Converted to single-channel luminescence", use_container_width=False)
+            st.markdown("#### 2. Bilateral Smoothing")
+            st.image(pix_smooth, width=250, caption="Edge-preserving baseline applied", use_container_width=False)
+            st.markdown("#### 3. Absolute Difference")
+            st.image(pix_diff, width=250, caption="Pixel-wise deviation calculated", use_container_width=False)
 
         elif st.session_state["active_insp"] == "qual":
             st.markdown("""
@@ -758,20 +746,15 @@ if selected_img is not None:
                 <div class="laser-line"></div>
             </div>
             """, unsafe_allow_html=True)
-            st.image(quality_map, width=300, caption="Compression Quality & Blocking Variance Map (1:1 Ratio)", use_container_width=False)
+            st.image(quality_map, width=300, caption="Final Output: Compression Quality & Blocking Variance Map (1:1 Ratio)", use_container_width=False)
             st.success("✅ Quality blocking map computed successfully. Mismatched quantization grids expose spliced regions.")
             
-            # Step-by-Step Toggle below output
-            if st.button("Show Processing Steps for Quality Blocking"):
-                st.markdown("""
-                <div class="step-box">
-                    <b>Step-by-Step Processing Pipeline:</b><br>
-                    1. <b>DCT Grid Partitioning:</b> Splits grayscale image into non-overlapping 8x8 pixel blocks.<br>
-                    2. <b>Variance Calculation:</b> Computes local block-level variance to detect quantization mismatches.<br>
-                    3. <b>Normalization:</b> Scales variance values across 0–255 range.<br>
-                    4. <b>MAGMA Visualization:</b> Renders compression artifacts and multi-save grid seams.
-                </div>
-                """, unsafe_allow_html=True)
+            st.markdown("#### 1. Grayscale Extract")
+            st.image(qual_gray.astype(np.uint8), width=250, caption="Base layer", use_container_width=False)
+            st.markdown("#### 2. 8x8 DCT Block Variance Calculation")
+            st.image(qual_block, width=250, caption="Raw variance array mapped", use_container_width=False, clamp=True)
+            st.markdown("#### 3. Scaling & Normalization")
+            st.image(qual_norm, width=250, caption="Scaled 0-255 map", use_container_width=False)
 
         elif st.session_state["active_insp"] == "srm":
             st.markdown("""
@@ -780,20 +763,15 @@ if selected_img is not None:
                 <div class="laser-line"></div>
             </div>
             """, unsafe_allow_html=True)
-            st.image(srm_map, width=300, caption="SRM High-Pass Sensor Noise Residuals (1:1 Ratio)", use_container_width=False)
+            st.image(srm_map, width=300, caption="Final Output: SRM High-Pass Sensor Noise Residuals (1:1 Ratio)", use_container_width=False)
             st.success("✅ SRM noise extraction completed. Abrupt noise cuts indicate foreign objects pasted from different cameras.")
             
-            # Step-by-Step Toggle below output
-            if st.button("Show Processing Steps for SRM Noise Analysis"):
-                st.markdown("""
-                <div class="step-box">
-                    <b>Step-by-Step Processing Pipeline:</b><br>
-                    1. <b>High-Pass Convolution:</b> Applies 5x5 SRM kernel filter to strip away smooth gradients.<br>
-                    2. <b>Residual Extraction:</b> Isolates high-frequency CMOS sensor pattern noise (PRNU fingerprint).<br>
-                    3. <b>Clipping & Scaling:</b> Enhances residual amplitudes by a factor of 4.<br>
-                    4. <b>BONE Pseudocoloring:</b> Visualizes noise consistency across spatial plane.
-                </div>
-                """, unsafe_allow_html=True)
+            st.markdown("#### 1. Image Grayscale")
+            st.image(srm_gray, width=250, caption="Grayscale preprocessing", use_container_width=False)
+            st.markdown("#### 2. 5x5 High-Pass Kernel Convolution")
+            st.image(srm_raw, width=250, caption="Raw PRNU noise extraction", use_container_width=False, clamp=True)
+            st.markdown("#### 3. Residual Amplification")
+            st.image(srm_noise, width=250, caption="Noise scaled by factor of 4x", use_container_width=False)
 
         elif st.session_state["active_insp"] == "ela":
             st.markdown("""
@@ -802,20 +780,15 @@ if selected_img is not None:
                 <div class="laser-line"></div>
             </div>
             """, unsafe_allow_html=True)
-            st.image(ela_default, width=300, caption=f"Error Level Analysis (ELA) at Q={ela_q} (1:1 Ratio)", use_container_width=False)
+            st.image(ela_default, width=300, caption=f"Final Output: Error Level Analysis (ELA) at Q={ela_q} (1:1 Ratio)", use_container_width=False)
             st.success("✅ ELA analysis completed successfully. Discrepancies in error brightness reveal manipulated regions.")
             
-            # Step-by-Step Toggle below output
-            if st.button("Show Processing Steps for Error Level Analysis"):
-                st.markdown("""
-                <div class="step-box">
-                    <b>Step-by-Step Processing Pipeline:</b><br>
-                    1. <b>Controlled Re-saving:</b> Saves input image at standard JPEG quality level (Q=90).<br>
-                    2. <b>Difference Calculation:</b> Computes absolute pixel differences between original and re-saved frame.<br>
-                    3. <b>Scale Enhancement:</b> Amplifies error residuals by a scale factor of 20x.<br>
-                    4. <b>Residual Evaluation:</b> Highlights areas with different compression histories or high error energy.
-                </div>
-                """, unsafe_allow_html=True)
+            st.markdown(f"#### 1. Re-saving Target")
+            st.image(ela_resaved, width=250, caption=f"Image mathematically re-saved at JPEG Quality {ela_q}", use_container_width=False)
+            st.markdown("#### 2. Absolute Difference Calculation")
+            st.image(ela_diff_raw, width=250, caption="Pixel difference between Original and Re-saved", use_container_width=False)
+            st.markdown("#### 3. Enhancement Factor")
+            st.image(ela_default, width=250, caption="Error amplified by factor of 20x to reveal boundaries", use_container_width=False)
 
         else:
             st.info("👆 Click any of the technique buttons above to execute the pipeline and inspect results on demand.")
