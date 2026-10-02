@@ -656,7 +656,7 @@ if selected_img is not None:
         st.session_state["forensic_history"].insert(0, current_case)
 
     # --------------------------------------------------------
-    # TAB 1: Multi-Spectral Inspector with Side-by-Side Custom Execution Buttons & Animations (1:1 Ratio width=300)
+    # TAB 1: Multi-Spectral Inspector with Side-by-Side Custom Execution Buttons
     # --------------------------------------------------------
     with main_tab:
         if st.session_state["last_analyzed_name"] != sample_name:
@@ -677,7 +677,7 @@ if selected_img is not None:
             st.session_state["last_analyzed_name"] = sample_name
 
         st.write("---")
-        # Display Input Image side-by-side with the Integrity Verdict Badge in a strict 1:1 proportional size match (width=300)
+        # Display Input Image side-by-side with the Integrity Verdict Badge (1:1 Ratio width=300)
         inp_col1, inp_col2 = st.columns([1, 1])
         with inp_col1:
             st.markdown("##### 📁 Input Image Preview")
@@ -701,8 +701,8 @@ if selected_img is not None:
             )
 
         st.write("---")
-        st.subheader("🖼️ Multi-Spectral Inspector (On-Demand Execution with Step-by-Step Pipeline)")
-        st.caption("Click any custom technique button below to view its processing steps, trigger the HUD scan animation, and render results in a compact 1:1 square ratio (width=300) on demand.")
+        st.subheader("🖼️ Multi-Spectral Inspector (On-Demand Execution)")
+        st.caption("Click any technique button below to execute the algorithm and render results in a compact 1:1 square ratio (width=300). View its step-by-step pipeline using the dedicated toggles below the output.")
 
         # Side-by-side custom buttons for the 4 key techniques
         col_b1, col_b2, col_b3, col_b4 = st.columns(4)
@@ -713,7 +713,7 @@ if selected_img is not None:
         with col_b3:
             btn_srm = st.button("📡 SRM Noise", use_container_width=True)
         with col_b4:
-            btn_ela = st.button("🕵️ Error Level (ELA)", use_container_width=True)
+            btn_ela = st.button("🕵️️ Error Level (ELA)", use_container_width=True)
 
         st.write("---")
 
@@ -736,17 +736,20 @@ if selected_img is not None:
                 <div class="laser-line"></div>
             </div>
             """, unsafe_allow_html=True)
-            st.markdown("""
-            <div class="step-box">
-                <b>Step-by-Step Processing Pipeline:</b><br>
-                1. <b>Grayscale Conversion:</b> Converts RGB input frame into single-channel luminescence.<br>
-                2. <b>Bilateral Smoothing:</b> Applies edge-preserving bilateral filtering to establish pristine reference baseline.<br>
-                3. <b>Absolute Difference:</b> Computes pixel-wise deviation between raw input and smoothed baseline.<br>
-                4. <b>Thermal Pseudocoloring:</b> Applies JET colormap to highlight micro-alterations and splicing seams.
-            </div>
-            """, unsafe_allow_html=True)
             st.image(pixel_diff_map, width=300, caption="Pixel Difference Thermal Heatmap (1:1 Ratio)", use_container_width=False)
             st.success("✅ Pixel comparison completed successfully. High-intensity thermal areas indicate micro-variances.")
+            
+            # Step-by-Step Toggle below output
+            if st.button("Show Processing Steps for Pixel Comparison"):
+                st.markdown("""
+                <div class="step-box">
+                    <b>Step-by-Step Processing Pipeline:</b><br>
+                    1. <b>Grayscale Conversion:</b> Converts RGB input frame into single-channel luminescence.<br>
+                    2. <b>Bilateral Smoothing:</b> Applies edge-preserving bilateral filtering to establish pristine reference baseline.<br>
+                    3. <b>Absolute Difference:</b> Computes pixel-wise deviation between raw input and smoothed baseline.<br>
+                    4. <b>Thermal Pseudocoloring:</b> Applies JET colormap to highlight micro-alterations and splicing seams.
+                </div>
+                """, unsafe_allow_html=True)
 
         elif st.session_state["active_insp"] == "qual":
             st.markdown("""
@@ -755,17 +758,20 @@ if selected_img is not None:
                 <div class="laser-line"></div>
             </div>
             """, unsafe_allow_html=True)
-            st.markdown("""
-            <div class="step-box">
-                <b>Step-by-Step Processing Pipeline:</b><br>
-                1. <b>DCT Grid Partitioning:</b> Splits grayscale image into non-overlapping 8x8 pixel blocks.<br>
-                2. <b>Variance Calculation:</b> Computes local block-level variance to detect quantization mismatches.<br>
-                3. <b>Normalization:</b> Scales variance values across 0–255 range.<br>
-                4. <b>MAGMA Visualization:</b> Renders compression artifacts and multi-save grid seams.
-            </div>
-            """, unsafe_allow_html=True)
             st.image(quality_map, width=300, caption="Compression Quality & Blocking Variance Map (1:1 Ratio)", use_container_width=False)
             st.success("✅ Quality blocking map computed successfully. Mismatched quantization grids expose spliced regions.")
+            
+            # Step-by-Step Toggle below output
+            if st.button("Show Processing Steps for Quality Blocking"):
+                st.markdown("""
+                <div class="step-box">
+                    <b>Step-by-Step Processing Pipeline:</b><br>
+                    1. <b>DCT Grid Partitioning:</b> Splits grayscale image into non-overlapping 8x8 pixel blocks.<br>
+                    2. <b>Variance Calculation:</b> Computes local block-level variance to detect quantization mismatches.<br>
+                    3. <b>Normalization:</b> Scales variance values across 0–255 range.<br>
+                    4. <b>MAGMA Visualization:</b> Renders compression artifacts and multi-save grid seams.
+                </div>
+                """, unsafe_allow_html=True)
 
         elif st.session_state["active_insp"] == "srm":
             st.markdown("""
@@ -774,17 +780,20 @@ if selected_img is not None:
                 <div class="laser-line"></div>
             </div>
             """, unsafe_allow_html=True)
-            st.markdown("""
-            <div class="step-box">
-                <b>Step-by-Step Processing Pipeline:</b><br>
-                1. <b>High-Pass Convolution:</b> Applies 5x5 SRM kernel filter to strip away smooth gradients.<br>
-                2. <b>Residual Extraction:</b> Isolates high-frequency CMOS sensor pattern noise (PRNU fingerprint).<br>
-                3. <b>Clipping & Scaling:</b> Enhances residual amplitudes by a factor of 4.<br>
-                4. <b>BONE Pseudocoloring:</b> Visualizes noise consistency across spatial plane.
-            </div>
-            """, unsafe_allow_html=True)
             st.image(srm_map, width=300, caption="SRM High-Pass Sensor Noise Residuals (1:1 Ratio)", use_container_width=False)
             st.success("✅ SRM noise extraction completed. Abrupt noise cuts indicate foreign objects pasted from different cameras.")
+            
+            # Step-by-Step Toggle below output
+            if st.button("Show Processing Steps for SRM Noise Analysis"):
+                st.markdown("""
+                <div class="step-box">
+                    <b>Step-by-Step Processing Pipeline:</b><br>
+                    1. <b>High-Pass Convolution:</b> Applies 5x5 SRM kernel filter to strip away smooth gradients.<br>
+                    2. <b>Residual Extraction:</b> Isolates high-frequency CMOS sensor pattern noise (PRNU fingerprint).<br>
+                    3. <b>Clipping & Scaling:</b> Enhances residual amplitudes by a factor of 4.<br>
+                    4. <b>BONE Pseudocoloring:</b> Visualizes noise consistency across spatial plane.
+                </div>
+                """, unsafe_allow_html=True)
 
         elif st.session_state["active_insp"] == "ela":
             st.markdown("""
@@ -793,17 +802,20 @@ if selected_img is not None:
                 <div class="laser-line"></div>
             </div>
             """, unsafe_allow_html=True)
-            st.markdown("""
-            <div class="step-box">
-                <b>Step-by-Step Processing Pipeline:</b><br>
-                1. <b>Controlled Re-saving:</b> Saves input image at standard JPEG quality level (Q=90).<br>
-                2. <b>Difference Calculation:</b> Computes absolute pixel differences between original and re-saved frame.<br>
-                3. <b>Scale Enhancement:</b> Amplifies error residuals by a scale factor of 20x.<br>
-                4. <b>Residual Evaluation:</b> Highlights areas with different compression histories or high error energy.
-            </div>
-            """, unsafe_allow_html=True)
             st.image(ela_default, width=300, caption=f"Error Level Analysis (ELA) at Q={ela_q} (1:1 Ratio)", use_container_width=False)
             st.success("✅ ELA analysis completed successfully. Discrepancies in error brightness reveal manipulated regions.")
+            
+            # Step-by-Step Toggle below output
+            if st.button("Show Processing Steps for Error Level Analysis"):
+                st.markdown("""
+                <div class="step-box">
+                    <b>Step-by-Step Processing Pipeline:</b><br>
+                    1. <b>Controlled Re-saving:</b> Saves input image at standard JPEG quality level (Q=90).<br>
+                    2. <b>Difference Calculation:</b> Computes absolute pixel differences between original and re-saved frame.<br>
+                    3. <b>Scale Enhancement:</b> Amplifies error residuals by a scale factor of 20x.<br>
+                    4. <b>Residual Evaluation:</b> Highlights areas with different compression histories or high error energy.
+                </div>
+                """, unsafe_allow_html=True)
 
         else:
             st.info("👆 Click any of the technique buttons above to execute the pipeline and inspect results on demand.")
