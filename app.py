@@ -713,7 +713,7 @@ if selected_img is not None:
         with col_b3:
             btn_srm = st.button("📡 SRM Noise", use_container_width=True)
         with col_b4:
-            btn_ela = st.button("🕵️️ Error Level (ELA)", use_container_width=True)
+            btn_ela = st.button("🕵️ Error Level (ELA)", use_container_width=True)
 
         st.write("---")
 
