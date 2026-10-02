@@ -677,11 +677,11 @@ if selected_img is not None:
             st.session_state["last_analyzed_name"] = sample_name
 
         st.write("---")
-        # Display Input Image side-by-side with the Integrity Verdict Badge (Controlled smaller width for neatness)
+        # Display Input Image side-by-side with the Integrity Verdict Badge in a strict 1:1 proportional size match (width=300)
         inp_col1, inp_col2 = st.columns([1, 1])
         with inp_col1:
             st.markdown("##### 📁 Input Image Preview")
-            st.image(selected_img, width=420, caption=f"Uploaded Evidence: {sample_name} ({orig_w}x{orig_h}px)")
+            st.image(selected_img, width=300, caption=f"Uploaded Evidence: {sample_name} ({orig_w}x{orig_h}px)")
         with inp_col2:
             st.markdown("##### 🔍 Forensic Verdict & Summary")
             if is_tampered:
@@ -702,7 +702,7 @@ if selected_img is not None:
 
         st.write("---")
         st.subheader("🖼️ Multi-Spectral Inspector (On-Demand Execution with Step-by-Step Pipeline)")
-        st.caption("Click any custom technique button below to view its processing steps, trigger the HUD scan animation, and render results in a neat, manageable size on demand.")
+        st.caption("Click any custom technique button below to view its processing steps, trigger the HUD scan animation, and render results in a compact 1:1 square ratio on demand.")
 
         # Side-by-side custom buttons for the 4 key techniques
         col_b1, col_b2, col_b3, col_b4 = st.columns(4)
@@ -745,7 +745,7 @@ if selected_img is not None:
                 4. <b>Thermal Pseudocoloring:</b> Applies JET colormap to highlight micro-alterations and splicing seams.
             </div>
             """, unsafe_allow_html=True)
-            st.image(pixel_diff_map, width=480, caption="Pixel Difference Thermal Heatmap Results", use_container_width=False)
+            st.image(pixel_diff_map, width=300, caption="Pixel Difference Thermal Heatmap (1:1 Ratio)", use_container_width=False)
             st.success("✅ Pixel comparison completed successfully. High-intensity thermal areas indicate micro-variances.")
 
         elif st.session_state["active_insp"] == "qual":
@@ -764,7 +764,7 @@ if selected_img is not None:
                 4. <b>MAGMA Visualization:</b> Renders compression artifacts and multi-save grid seams.
             </div>
             """, unsafe_allow_html=True)
-            st.image(quality_map, width=480, caption="Compression Quality & Blocking Variance Map", use_container_width=False)
+            st.image(quality_map, width=300, caption="Compression Quality & Blocking Variance Map (1:1 Ratio)", use_container_width=False)
             st.success("✅ Quality blocking map computed successfully. Mismatched quantization grids expose spliced regions.")
 
         elif st.session_state["active_insp"] == "srm":
@@ -783,7 +783,7 @@ if selected_img is not None:
                 4. <b>BONE Pseudocoloring:</b> Visualizes noise consistency across spatial plane.
             </div>
             """, unsafe_allow_html=True)
-            st.image(srm_map, width=480, caption="SRM High-Pass Sensor Noise Residuals", use_container_width=False)
+            st.image(srm_map, width=300, caption="SRM High-Pass Sensor Noise Residuals (1:1 Ratio)", use_container_width=False)
             st.success("✅ SRM noise extraction completed. Abrupt noise cuts indicate foreign objects pasted from different cameras.")
 
         elif st.session_state["active_insp"] == "ela":
@@ -802,7 +802,7 @@ if selected_img is not None:
                 4. <b>Residual Evaluation:</b> Highlights areas with different compression histories or high error energy.
             </div>
             """, unsafe_allow_html=True)
-            st.image(ela_default, width=480, caption=f"Error Level Analysis (ELA) at Q={ela_q}", use_container_width=False)
+            st.image(ela_default, width=300, caption=f"Error Level Analysis (ELA) at Q={ela_q} (1:1 Ratio)", use_container_width=False)
             st.success("✅ ELA analysis completed successfully. Discrepancies in error brightness reveal manipulated regions.")
 
         else:
@@ -828,19 +828,19 @@ if selected_img is not None:
             st.markdown("#### Lighting & Shadow Direction Consistency")
             st.write("Evaluates 3D illumination angles across the V-channel to expose contradictory light sources or floating objects.")
             if st.button("🚀 Run Lighting Vector Analysis", key="btn_shad", use_container_width=True):
-                st.image(shadow_map, width=480, caption="Lighting & Shadow Vector Consistency Map", use_container_width=False)
+                st.image(shadow_map, width=300, caption="Lighting & Shadow Vector Consistency Map (1:1 Ratio)", use_container_width=False)
 
         with t_fft:
             st.markdown("#### Frequency Domain 2D-FFT Power Spectrum")
             st.write("Exposes periodic grid patterns and GAN upsampling artifacts.")
             if st.button("🚀 Run 2D-FFT Spectrum", key="btn_fft", use_container_width=True):
-                st.image(fft_map, width=480, caption="2D-FFT Power Spectrum", use_container_width=False)
+                st.image(fft_map, width=300, caption="2D-FFT Power Spectrum (1:1 Ratio)", use_container_width=False)
 
         with t_edge:
             st.markdown("#### Edge Discontinuity Mapping")
             st.write("Exposes boundary seams and anti-aliasing halos using Canny-Laplacian gradients.")
             if st.button("🚀 Run Edge Analysis", key="btn_edge", use_container_width=True):
-                st.image(edge_map, caption="Edge Discontinuity Map", use_container_width=False)
+                st.image(edge_map, width=300, caption="Edge Discontinuity Map (1:1 Ratio)", use_container_width=False)
 
         with t_lsb:
             st.markdown("#### LSB (Least Significant Bit) Analysis")
@@ -848,7 +848,7 @@ if selected_img is not None:
             if st.button("🚀 Run LSB Bit-Plane Audit", key="btn_lsb", use_container_width=True):
                 st.metric("Bit-1 Ratio", f"{lsb_ratio:.2f}%")
                 st.metric("Tamper Risk Score", f"{lsb_risk:.1f}%")
-                st.image(lsb_vis, width=480, caption="LSB Randomness Heatmap", use_container_width=False)
+                st.image(lsb_vis, width=300, caption="LSB Randomness Heatmap (1:1 Ratio)", use_container_width=False)
 
         with t_meta:
             st.markdown("#### EXIF Metadata Headers")
@@ -862,7 +862,10 @@ if selected_img is not None:
             st.markdown("#### Cryptographic & Perceptual Hashes")
             st.write("Generates bitstream SHA-256 digests and perceptual hashes.")
             if st.button("🚀 Compute Hashes", key="btn_hash", use_container_width=True):
-                st.code(f"SHA-256: {hashes['SHA-256']}\nMD5:     {hashes['MD5']}\ndHash:   {hashes['dHash']}\naHash:   {hashes['aHash']}", language="bash")
+                st.code(f"SHA-256: {hashes['SHA-256']}
+MD5:     {hashes['MD5']}
+dHash:   {hashes['dHash']}
+aHash:   {hashes['aHash']}", language="bash")
 
     # --------------------------------------------------------
     # TAB 3: History Audit
