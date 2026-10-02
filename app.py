@@ -255,6 +255,14 @@ st.markdown("""
         font-weight: 800;
         text-align: center;
     }
+    .step-box {
+        background: rgba(15, 23, 42, 0.95);
+        border-left: 4px solid #38bdf8;
+        padding: 12px;
+        margin: 8px 0;
+        border-radius: 0 8px 8px 0;
+        font-size: 0.85rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -681,7 +689,7 @@ if selected_img is not None:
 
         st.write("---")
         st.subheader("🖼️ Multi-Spectral Inspector (On-Demand Execution)")
-        st.caption("Click any technique button below to execute the algorithm and render results in a 1:1 square ratio (width=300). Click the button below each result to view the processed intermediate images.")
+        st.caption("Click any technique button below to execute the algorithm and render results in a 1:1 square ratio (width=300).")
 
         # Side-by-side execution buttons
         col_b1, col_b2, col_b3, col_b4 = st.columns(4)
@@ -723,6 +731,9 @@ if selected_img is not None:
             st.image(pixel_diff_map, width=300, caption="Final Output: Pixel Difference Thermal Heatmap (1:1 Ratio)", use_container_width=False)
             st.success("✅ Pixel comparison completed successfully. High-intensity thermal areas indicate micro-variances.")
             
+            with st.expander("🧠 How this technique detects forgery (Proof & Logic)"):
+                st.write("**The Proof:** Authentic images maintain continuous local pixel variance. When an object is digitally spliced, the boundaries and the object itself carry a foreign noise and lighting signature. By comparing the raw image to an edge-preserved smoothed baseline, the absolute difference mathematically isolates these unnatural micro-variances.")
+
             if st.button("⚙️ Show/Hide Processed Pipeline Images", key="toggle_pix_steps"):
                 st.session_state["show_steps_pixel"] = not st.session_state["show_steps_pixel"]
             
@@ -746,6 +757,9 @@ if selected_img is not None:
             st.image(quality_map, width=300, caption="Final Output: Compression Quality & Blocking Variance Map (1:1 Ratio)", use_container_width=False)
             st.success("✅ Quality blocking map computed successfully. Mismatched quantization grids expose spliced regions.")
             
+            with st.expander("🧠 How this technique detects forgery (Proof & Logic)"):
+                st.write("**The Proof:** JPEG images are compressed in rigid 8x8 pixel grids (Discrete Cosine Transform blocks). When a forged element is pasted, its 8x8 grid almost never aligns perfectly with the background's grid. Furthermore, different quantization tables leave different block variances. This technique maps block-level variance, proving tampering wherever the 8x8 grid is physically interrupted or computationally mismatched.")
+
             if st.button("⚙️ Show/Hide Processed Pipeline Images", key="toggle_qual_steps"):
                 st.session_state["show_steps_qual"] = not st.session_state["show_steps_qual"]
                 
@@ -769,6 +783,9 @@ if selected_img is not None:
             st.image(srm_map, width=300, caption="Final Output: SRM High-Pass Sensor Noise Residuals (1:1 Ratio)", use_container_width=False)
             st.success("✅ SRM noise extraction completed. Abrupt noise cuts indicate foreign objects pasted from different cameras.")
             
+            with st.expander("🧠 How this technique detects forgery (Proof & Logic)"):
+                st.write("**The Proof:** Every digital camera sensor leaves a microscopic, invisible 'fingerprint' called PRNU (Photo Response Non-Uniformity) noise. The 5x5 High-Pass SRM kernel actively strips away the image's normal content (edges, colors) to reveal only this sensor noise. If an object is spliced from another camera, its noise fingerprint will violently clash with the background noise, providing mathematical proof of forgery.")
+
             if st.button("⚙️ Show/Hide Processed Pipeline Images", key="toggle_srm_steps"):
                 st.session_state["show_steps_srm"] = not st.session_state["show_steps_srm"]
                 
@@ -792,6 +809,9 @@ if selected_img is not None:
             st.image(ela_default, width=300, caption=f"Final Output: Error Level Analysis (ELA) at Q={ela_q} (1:1 Ratio)", use_container_width=False)
             st.success("✅ ELA analysis completed successfully. Discrepancies in error brightness reveal manipulated regions.")
             
+            with st.expander("🧠 How this technique detects forgery (Proof & Logic)"):
+                st.write(f"**The Proof:** Every time a JPEG is saved, it loses data. If an image is authentic, its compression degradation across the canvas is uniform. However, if a subject is pasted from another image, that pasted region has a completely different 'save history'. By intentionally re-saving the entire image at Q={ela_q} and mathematically subtracting it from the original, regions with different histories will decay at different rates—lighting up as bright anomalies against the dark background.")
+
             if st.button("⚙️ Show/Hide Processed Pipeline Images", key="toggle_ela_steps"):
                 st.session_state["show_steps_ela"] = not st.session_state["show_steps_ela"]
                 
@@ -840,6 +860,9 @@ if selected_img is not None:
                 st.image(shadow_map, width=300, caption="Final Output: Lighting & Shadow Vector Consistency Map (1:1 Ratio)", use_container_width=False)
                 st.success("✅ Lighting vector calculation complete.")
 
+                with st.expander("🧠 How this technique detects forgery (Proof & Logic)"):
+                    st.write("**The Proof:** Authentic photographs share a single, mathematically cohesive global light source. When an attacker pastes an object from a different image, its internal shadows and highlights retain the lighting angle of the *original* room/environment. By isolating the HSV brightness channel and applying Sobel directional derivatives, this algorithm computes the precise light angles. Conflicting color mapped angles prove the object does not belong in this environment.")
+
                 if st.button("⚙️ Show/Hide Processed Pipeline Images", key="toggle_shad_steps"):
                     st.session_state["show_steps_shad"] = not st.session_state["show_steps_shad"]
                 
@@ -867,6 +890,9 @@ if selected_img is not None:
                 st.image(fft_map, width=300, caption="Final Output: 2D-FFT Power Spectrum (1:1 Ratio)", use_container_width=False)
                 st.success("✅ Fourier transform complete.")
 
+                with st.expander("🧠 How this technique detects forgery (Proof & Logic)"):
+                    st.write("**The Proof:** Natural images contain smooth, random frequencies. However, operations like Deepfake generation, GAN upsampling, or copy-move cloning introduce hidden geometric regularities into the pixel array. By converting the spatial image into the frequency domain using a Fast Fourier Transform (FFT), these unnatural regularities manifest as mathematically impossible bright stars, grid peaks, or rings in the frequency spectrum.")
+
                 if st.button("⚙️ Show/Hide Processed Pipeline Images", key="toggle_fft_steps"):
                     st.session_state["show_steps_fft"] = not st.session_state["show_steps_fft"]
                 
@@ -893,6 +919,9 @@ if selected_img is not None:
                 """, unsafe_allow_html=True)
                 st.image(edge_map, width=300, caption="Final Output: Edge Discontinuity Map (1:1 Ratio)", use_container_width=False)
                 st.success("✅ Edge analysis complete.")
+
+                with st.expander("🧠 How this technique detects forgery (Proof & Logic)"):
+                    st.write("**The Proof:** When an object is manually cut out and pasted into an image, the attacker invariably leaves a rigid mathematical boundary or an artificial blurring 'halo' to blend the edge. Real optical physics dictate uniform focal blur gradients. By applying strict Laplacian second-derivative math alongside Canny hysteresis, we expose edges that are too sharp or structurally discontinuous for a physical camera lens to have produced.")
 
                 if st.button("⚙️ Show/Hide Processed Pipeline Images", key="toggle_edge_steps"):
                     st.session_state["show_steps_edge"] = not st.session_state["show_steps_edge"]
@@ -922,6 +951,9 @@ if selected_img is not None:
                 st.metric("Tamper Risk Score", f"{lsb_risk:.1f}%")
                 st.image(lsb_vis, width=300, caption="Final Output: LSB Randomness Heatmap (1:1 Ratio)", use_container_width=False)
                 st.success("✅ Bit-plane analysis complete.")
+
+                with st.expander("🧠 How this technique detects forgery (Proof & Logic)"):
+                    st.write("**The Proof:** In an 8-bit image, the absolute Least Significant Bit (LSB) governs tiny, imperceptible color changes. Because optical cameras capture natural microscopic photon noise, an authentic LSB plane looks like pure random static (roughly a 50% ratio of ones and zeros). If an attacker injects hidden data (steganography) or forcibly edits pixels, the 50% randomness is mathematically destroyed, revealing blocks of solid color or structured anomalies in the bit-plane.")
 
                 if st.button("⚙️ Show/Hide Processed Pipeline Images", key="toggle_lsb_steps"):
                     st.session_state["show_steps_lsb"] = not st.session_state["show_steps_lsb"]
