@@ -106,9 +106,10 @@ st.markdown("""
         color: #ffffff !important;
     }
 
-    /* Laser Scanner HUD */
+    /* Laser Scanner HUD - Fixed Height for Running Animation */
     .laser-scan-frame {
         position: relative;
+        height: 55px;
         overflow: hidden;
         border: 2px solid #38bdf8;
         border-radius: 12px;
@@ -128,8 +129,8 @@ st.markdown("""
     }
     .hud-tag {
         position: absolute;
-        top: 10px;
-        left: 10px;
+        top: 12px;
+        left: 12px;
         background: rgba(15, 23, 42, 0.85);
         color: #38bdf8;
         padding: 4px 10px;
@@ -184,8 +185,10 @@ st.markdown("""
         animation: pulseIcon 2.5s infinite ease-in-out;
     }
 
+    /* Radar Container - Fixed Height for Running Animation */
     .radar-container {
         position: relative;
+        height: 50px;
         overflow: hidden;
         border: 1px solid rgba(56, 189, 248, 0.6);
         border-radius: 10px;
@@ -232,11 +235,6 @@ st.markdown("""
         margin-bottom: 4px;
         text-transform: uppercase;
     }
-    .tile-caption {
-        font-size: 0.72rem;
-        color: #94a3b8;
-        margin-top: 4px;
-    }
     .badge-forged {
         background: rgba(239, 68, 68, 0.15);
         color: #f87171;
@@ -257,13 +255,13 @@ st.markdown("""
         font-weight: 800;
         text-align: center;
     }
-
-    .param-card {
-        background: rgba(15, 23, 42, 0.8);
-        border: 1px solid rgba(56, 189, 248, 0.25);
-        border-radius: 10px;
-        padding: 14px;
-        margin-bottom: 14px;
+    .step-box {
+        background: rgba(15, 23, 42, 0.95);
+        border-left: 4px solid #38bdf8;
+        padding: 12px;
+        margin: 8px 0;
+        border-radius: 0 8px 8px 0;
+        font-size: 0.85rem;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -358,7 +356,6 @@ def compute_quality_blocking_map(img_np):
     return cv2.cvtColor(cv2.applyColorMap(q_norm, cv2.COLORMAP_MAGMA), cv2.COLOR_BGR2RGB)
 
 def compute_lighting_shadow_map(img_np):
-    """Footing & Lighting/Shadow Vector Consistency"""
     hsv = cv2.cvtColor(img_np, cv2.COLOR_RGB2HSV)
     v = hsv[:, :, 2]
     sobelx = cv2.Sobel(v, cv2.CV_64F, 1, 0, ksize=3)
@@ -368,7 +365,6 @@ def compute_lighting_shadow_map(img_np):
     return cv2.cvtColor(cv2.applyColorMap(dir_u8, cv2.COLORMAP_OCEAN), cv2.COLOR_BGR2RGB)
 
 def compute_cmaf_copy_move(img_np):
-    """CMAF Copy-Move Keypoint Matching (ORB Matcher)"""
     gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
     orb = cv2.ORB_create(nfeatures=600)
     kp, des = orb.detectAndCompute(gray, None)
@@ -387,14 +383,12 @@ def compute_cmaf_copy_move(img_np):
     return vis, match_count
 
 def compute_lsb_steganography(img_np):
-    """LSB Bit-Plane Randomness Analysis"""
     lsb = (img_np[:, :, 0] & 1) * 255
     ratio = (np.count_nonzero(lsb == 255) / lsb.size) * 100.0
     risk = min(100.0, abs(ratio - 50.0) * 4.0)
     return cv2.cvtColor(cv2.applyColorMap(lsb.astype(np.uint8), cv2.COLORMAP_JET), cv2.COLOR_BGR2RGB), ratio, risk
 
 def compute_fft(img_np):
-    """Frequency Domain 2D-FFT Power Spectrum"""
     gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
     f = np.fft.fft2(gray)
     fshift = np.fft.fftshift(f)
@@ -403,7 +397,6 @@ def compute_fft(img_np):
     return cv2.cvtColor(cv2.applyColorMap(mag_norm, cv2.COLORMAP_VIRIDIS), cv2.COLOR_BGR2RGB)
 
 def compute_edges(img_np):
-    """Edge Discontinuity Mapping"""
     gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
     laplacian = np.uint8(np.absolute(cv2.Laplacian(gray, cv2.CV_64F)))
     canny = cv2.Canny(gray, 60, 200)
@@ -467,7 +460,7 @@ def generate_pdf_report(case_dict):
     append_img_to_story(case_dict["pixel_diff"], "2. Pixel Difference Heatmap")
     story.append(PageBreak())
     append_img_to_story(case_dict["quality_map"], "3. Image Quality & Compression Blocking Map")
-    append_img_to_story(case_dict["cmaf_vis"], "4. CMAF Copy-Move Keypoint Matcher")
+    append_img_to_story(case_dict["cmaf_vis"], "4. CMAF Keypoint Matcher")
 
     doc.build(story)
     pdf_buffer.seek(0)
@@ -499,7 +492,7 @@ with st.sidebar:
     st.markdown("""
     <div class="sidebar-header-card">
         <div style="font-size:1.15rem; font-weight:800; color:#f8fafc; display:flex; align-items:center; gap:8px;">
-            <span class="pulsing-shield">🛡️️</span> Multi-Spectral Forensics
+            <span class="pulsing-shield">🛡️</span> Multi-Spectral Forensics
         </div>
         <div style="font-size:0.75rem; color:#94a3b8; margin-top:4px;">
             Deep Learning + Advanced Forensics Suite
@@ -507,27 +500,13 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
-    mode = st.radio("Source Mode", ["Preset Case Evidence", "Upload Custom Image", "Batch / Bulk Ingestion"])
+    mode = st.radio("Source Mode", ["Upload Custom Image", "Batch / Bulk Ingestion"])
     selected_img = None
     raw_file_bytes = None
     sample_name = "custom_upload.png"
     batch_items = []
 
-    if mode == "Preset Case Evidence":
-        samples = {}
-        if os.path.exists("data/forged"):
-            for f in os.listdir("data/forged")[:6]:
-                samples[f"⚠️ [Forged] {f}"] = os.path.join("data/forged", f)
-        if os.path.exists("data/authentic"):
-            for f in os.listdir("data/authentic")[:4]:
-                samples[f"✅ [Authentic] {f}"] = os.path.join("data/authentic", f)
-        if samples:
-            chosen = st.selectbox("Select Evidence", list(samples.keys()))
-            with open(samples[chosen], "rb") as f_in:
-                raw_file_bytes = f_in.read()
-            selected_img = Image.open(io.BytesIO(raw_file_bytes)).convert("RGB")
-            sample_name = chosen
-    elif mode == "Batch / Bulk Ingestion":
+    if mode == "Batch / Bulk Ingestion":
         st.markdown("""
         <div class="radar-container">
             <div class="radar-scanline"></div>
@@ -566,7 +545,7 @@ with st.sidebar:
             sample_name = uploaded.name
 
     st.divider()
-    threshold = st.slider("Classification Threshold", 0.1, 0.9, 0.65, 0.05)
+    threshold = st.slider("Classification Threshold", 0.1, 0.9, 0.60, 0.05)
     ela_q = st.slider("ELA Quality Base", 75, 95, 90, 5)
 
     if len(st.session_state["forensic_history"]) > 0:
@@ -581,11 +560,11 @@ with st.sidebar:
 # 5. Main Execution & Calibrated Consensus Engine
 # ------------------------------------------------------------
 st.title("🔬 Forensic Inspection & Multi-Parameter Suite")
-st.write("Deep learning detection fused with PRNU noise, CMAF keypoints, ELA compression, and frequency spectral analysis.")
+st.write("Deep learning detection fused with PRNU noise, ELA compression, and spectral frequency analysis.")
 
 main_tab, param_tab, history_tab = st.tabs([
     "⚡ Multi-Spectral Inspector",
-    "📊 Advanced Techniques (12 Modalities)",
+    "📊 Advanced State-of-the-Art Forensics",
     "📜 Session Audit History"
 ])
 
@@ -624,7 +603,7 @@ if selected_img is not None:
 
     # High thresholds to completely ignore natural mobile camera noise & lens grain
     is_neural_flagged = dl_conf >= threshold
-    is_ela_flagged = ela_anomaly >= 22.5
+    is_ela_flagged = ela_anomaly >= 22.0
     is_cmaf_flagged = cmaf_matches >= 4
     is_pixel_flagged = pixel_variance > 3500.0
 
@@ -681,7 +660,7 @@ if selected_img is not None:
         st.session_state["forensic_history"].insert(0, current_case)
 
     # --------------------------------------------------------
-    # TAB 1: Live Inspector
+    # TAB 1: Multi-Spectral Inspector with Side-by-Side Custom Execution Buttons & Animations
     # --------------------------------------------------------
     with main_tab:
         if st.session_state["last_analyzed_name"] != sample_name:
@@ -723,79 +702,134 @@ if selected_img is not None:
         )
 
         st.write("---")
-        st.subheader("🖼️ Advanced State-of-the-Art Forensic Matrix")
+        st.subheader("🖼️ Multi-Spectral Inspector (On-Demand Execution & Step-by-Step Pipeline)")
+        st.caption("Click any custom technique button below to view its processing steps, trigger the HUD scan animation, and render results on demand.")
 
-        d1, d2, d3, d4 = st.columns(4)
-        with d1:
-            st.markdown('<div class="forensic-tile"><div class="tile-title">1. Pixel Difference</div></div>', unsafe_allow_html=True)
-            st.image(pixel_diff_map, use_container_width=True)
-        with d2:
-            st.markdown('<div class="forensic-tile"><div class="tile-title">2. Quality Blocking Map</div></div>', unsafe_allow_html=True)
-            st.image(quality_map, use_container_width=True)
-        with d3:
-            st.markdown('<div class="forensic-tile"><div class="tile-title">3. CMAF Keypoints</div></div>', unsafe_allow_html=True)
-            st.image(cmaf_vis, use_container_width=True)
-        with d4:
-            st.markdown('<div class="forensic-tile"><div class="tile-title">4. SRM Noise Residuals</div></div>', unsafe_allow_html=True)
-            st.image(srm_map, use_container_width=True)
+        # Side-by-side custom buttons for the 4 key techniques
+        col_b1, col_b2, col_b3, col_b4 = st.columns(4)
+        with col_b1:
+            btn_pixel = st.button("🔥 Pixel Comparison", use_container_width=True)
+        with col_b2:
+            btn_qual = st.button("📊 Quality Blocking", use_container_width=True)
+        with col_b3:
+            btn_srm = st.button("📡 SRM Noise", use_container_width=True)
+        with col_b4:
+            btn_ela = st.button("🕵️ Error Level (ELA)", use_container_width=True)
+
+        st.write("---")
+
+        if "active_insp" not in st.session_state:
+            st.session_state["active_insp"] = None
+
+        if btn_pixel:
+            st.session_state["active_insp"] = "pixel"
+        elif btn_qual:
+            st.session_state["active_insp"] = "qual"
+        elif btn_srm:
+            st.session_state["active_insp"] = "srm"
+        elif btn_ela:
+            st.session_state["active_insp"] = "ela"
+
+        if st.session_state["active_insp"] == "pixel":
+            st.markdown("""
+            <div class="laser-scan-frame">
+                <div class="hud-tag">🔬 EXECUTING PIXEL COMPARISON PIPELINE</div>
+                <div class="laser-line"></div>
+            </div>
+            """, unsafe_allow_html=True)
+            st.markdown("""
+            <div class="step-box">
+                <b>Step-by-Step Processing Pipeline:</b><br>
+                1. <b>Grayscale Conversion:</b> Converts RGB input frame into single-channel luminescence.<br>
+                2. <b>Bilateral Smoothing:</b> Applies edge-preserving bilateral filtering to establish pristine reference baseline.<br>
+                3. <b>Absolute Difference:</b> Computes pixel-wise deviation between raw input and smoothed baseline.<br>
+                4. <b>Thermal Pseudocoloring:</b> Applies JET colormap to highlight micro-alterations and splicing seams.
+            </div>
+            """, unsafe_allow_html=True)
+            st.image(pixel_diff_map, caption="Pixel Difference Thermal Heatmap Results", use_container_width=True)
+            st.success("✅ Pixel comparison completed successfully. High-intensity thermal areas indicate micro-variances.")
+
+        elif st.session_state["active_insp"] == "qual":
+            st.markdown("""
+            <div class="laser-scan-frame">
+                <div class="hud-tag">🔬 EXECUTING QUALITY BLOCKING PIPELINE</div>
+                <div class="laser-line"></div>
+            </div>
+            """, unsafe_allow_html=True)
+            st.markdown("""
+            <div class="step-box">
+                <b>Step-by-Step Processing Pipeline:</b><br>
+                1. <b>DCT Grid Partitioning:</b> Splits grayscale image into non-overlapping 8x8 pixel blocks.<br>
+                2. <b>Variance Calculation:</b> Computes local block-level variance to detect quantization mismatches.<br>
+                3. <b>Normalization:</b> Scales variance values across 0–255 range.<br>
+                4. <b>MAGMA Visualization:</b> Renders compression artifacts and multi-save grid seams.
+            </div>
+            """, unsafe_allow_html=True)
+            st.image(quality_map, caption="Compression Quality & Blocking Variance Map", use_container_width=True)
+            st.success("✅ Quality blocking map computed successfully. Mismatched quantization grids expose spliced regions.")
+
+        elif st.session_state["active_insp"] == "srm":
+            st.markdown("""
+            <div class="laser-scan-frame">
+                <div class="hud-tag">🔬 EXECUTING SRM NOISE PIPELINE</div>
+                <div class="laser-line"></div>
+            </div>
+            """, unsafe_allow_html=True)
+            st.markdown("""
+            <div class="step-box">
+                <b>Step-by-Step Processing Pipeline:</b><br>
+                1. <b>High-Pass Convolution:</b> Applies 5x5 SRM kernel filter to strip away smooth gradients.<br>
+                2. <b>Residual Extraction:</b> Isolates high-frequency CMOS sensor pattern noise (PRNU fingerprint).<br>
+                3. <b>Clipping & Scaling:</b> Enhances residual amplitudes by a factor of 4.<br>
+                4. <b>BONE Pseudocoloring:</b> Visualizes noise consistency across spatial plane.
+            </div>
+            """, unsafe_allow_html=True)
+            st.image(srm_map, caption="SRM High-Pass Sensor Noise Residuals", use_container_width=True)
+            st.success("✅ SRM noise extraction completed. Abrupt noise cuts indicate foreign objects pasted from different cameras.")
+
+        elif st.session_state["active_insp"] == "ela":
+            st.markdown("""
+            <div class="laser-scan-frame">
+                <div class="hud-tag">🔬 EXECUTING ELA COMPRESSION PIPELINE</div>
+                <div class="laser-line"></div>
+            </div>
+            """, unsafe_allow_html=True)
+            st.markdown("""
+            <div class="step-box">
+                <b>Step-by-Step Processing Pipeline:</b><br>
+                1. <b>Controlled Re-saving:</b> Saves input image at standard JPEG quality level (Q=90).<br>
+                2. <b>Difference Calculation:</b> Computes absolute pixel differences between original and re-saved frame.<br>
+                3. <b>Scale Enhancement:</b> Amplifies error residuals by a scale factor of 20x.<br>
+                4. <b>Residual Evaluation:</b> Highlights areas with different compression histories or high error energy.
+            </div>
+            """, unsafe_allow_html=True)
+            st.image(ela_default, caption=f"Error Level Analysis (ELA) at Q={ela_q}", use_container_width=True)
+            st.success("✅ ELA analysis completed successfully. Discrepancies in error brightness reveal manipulated regions.")
+
+        else:
+            st.info("👆 Click any of the technique buttons above to execute the pipeline and inspect results on demand.")
 
     # --------------------------------------------------------
-    # TAB 2: Diagnostic Parameters (All 12 Modalities)
+    # TAB 2: Advanced State-of-the-Art Forensics
     # --------------------------------------------------------
     with param_tab:
         st.subheader("📊 Advanced Forensic Modalities & Diagnostic Parameters")
-        st.caption("Inspect all state-of-the-art detection pipelines: Neural models, PRNU noise, DQT compression tables, CMAF keypoints, lighting vectors, and LSB randomness.")
+        st.caption("Inspect auxiliary detection modalities: Lighting/Shadows, 2D-FFT Spectrum, Edge Discontinuity, LSB Randomness, Metadata, and Cryptographic Hashes.")
 
-        (t_cmaf, t_pix, t_qual, t_shad, t_srm, t_ela, t_fft, t_edge, t_lsb, t_meta, t_hash, t_history) = st.tabs([
-            "🔄 CMAF Copy-Move",
-            "🔥 Pixel Heatmap",
-            "📊 Quality DQT Map",
+        (t_shad, t_fft, t_edge, t_lsb, t_meta, t_hash) = st.tabs([
             "👥 Lighting / Shadows",
-            "📡 SRM / PRNU Noise",
-            "🕵️️ Error Level (ELA)",
             "📈 2D-FFT Spectrum",
             "🔍 Edge Discontinuity",
             "🛍️ LSB Bit-Plane",
             "📋 Metadata Audit",
-            "🔑 Cryptographic Hashes",
-            "📜 Provenance Log"
+            "🔑 Cryptographic Hashes"
         ])
-
-        with t_cmaf:
-            st.markdown("#### CMAF (Copy-Move Forgery Detection via Keypoints)")
-            st.write("Uses ORB feature vector matching to uncover duplicated regions pasted elsewhere in the image.")
-            if st.button("🚀 Run CMAF Keypoint Analysis", key="btn_cmaf", use_container_width=True):
-                st.image(cmaf_vis, caption=f"CMAF Feature Vector Duplication Map ({cmaf_matches} matches)", use_container_width=True)
-
-        with t_pix:
-            st.markdown("#### Pixel Difference Thermal Heatmap")
-            st.write("Isolates micro-variance anomalies against a bilateral smoothed baseline.")
-            if st.button("🚀 Run Pixel Difference Test", key="btn_pix", use_container_width=True):
-                st.image(pixel_diff_map, caption="Pixel Difference Heatmap", use_container_width=True)
-
-        with t_qual:
-            st.markdown("#### Image Quality & Compression Blocking (DQT Map)")
-            st.write("Computes local 8x8 DCT block variance to uncover regions compressed at different quality matrices.")
-            if st.button("🚀 Run Quality Blocking Map", key="btn_qual", use_container_width=True):
-                st.image(quality_map, caption="Compression Blocking Variance Map", use_container_width=True)
 
         with t_shad:
             st.markdown("#### Lighting & Shadow Direction Consistency")
             st.write("Evaluates 3D illumination angles across the V-channel to expose contradictory light sources or floating objects.")
             if st.button("🚀 Run Lighting Vector Analysis", key="btn_shad", use_container_width=True):
                 st.image(shadow_map, caption="Lighting & Shadow Vector Consistency Map", use_container_width=True)
-
-        with t_srm:
-            st.markdown("#### SRM Sensor Noise & PRNU Fingerprint")
-            st.write("Isolates high-pass CMOS sensor pattern noise to verify sensor response uniformity.")
-            if st.button("🚀 Extract PRNU / SRM Fingerprint", key="btn_srm", use_container_width=True):
-                st.image(srm_map, caption="SRM Sensor Noise Residuals", use_container_width=True)
-
-        with t_ela:
-            st.markdown("#### Error Level Analysis (ELA)")
-            st.write("Quantifies compression history divergence at 90% JPEG quality.")
-            if st.button("🚀 Run ELA Compression Test", key="btn_ela", use_container_width=True):
-                st.image(ela_default, caption="ELA Compression Residual", use_container_width=True)
 
         with t_fft:
             st.markdown("#### Frequency Domain 2D-FFT Power Spectrum")
@@ -830,11 +864,6 @@ if selected_img is not None:
             st.write("Generates bitstream SHA-256 digests and perceptual hashes.")
             if st.button("🚀 Compute Hashes", key="btn_hash", use_container_width=True):
                 st.code(f"SHA-256: {hashes['SHA-256']}\nMD5:     {hashes['MD5']}\ndHash:   {hashes['dHash']}\naHash:   {hashes['aHash']}", language="bash")
-
-        with t_history:
-            st.markdown("#### Provenance & Audit Logs")
-            st.write("Maintains immutable session audit trails.")
-            st.json(st.session_state["forensic_history"][:3])
 
     # --------------------------------------------------------
     # TAB 3: History Audit
