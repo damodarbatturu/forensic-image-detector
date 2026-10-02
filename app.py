@@ -255,14 +255,6 @@ st.markdown("""
         font-weight: 800;
         text-align: center;
     }
-    .step-box {
-        background: rgba(15, 23, 42, 0.95);
-        border-left: 4px solid #38bdf8;
-        padding: 12px;
-        margin: 8px 0;
-        border-radius: 0 8px 8px 0;
-        font-size: 0.85rem;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -695,7 +687,7 @@ if selected_img is not None:
 
         st.write("---")
         st.subheader("🖼️ Multi-Spectral Inspector (On-Demand Execution)")
-        st.caption("Click any technique button below to execute the algorithm and render results in a compact 1:1 square ratio (width=300). The step-by-step intermediate images will be shown below the final output.")
+        st.caption("Click any technique button below to execute the algorithm and render results in a compact 1:1 square ratio (width=300). The step-by-step intermediate images will load automatically below the final output.")
 
         # Side-by-side custom buttons for the 4 key techniques
         col_b1, col_b2, col_b3, col_b4 = st.columns(4)
@@ -732,12 +724,14 @@ if selected_img is not None:
             st.image(pixel_diff_map, width=300, caption="Final Output: Pixel Difference Thermal Heatmap (1:1 Ratio)", use_container_width=False)
             st.success("✅ Pixel comparison completed successfully. High-intensity thermal areas indicate micro-variances.")
             
-            st.markdown("#### 1. Grayscale Conversion")
-            st.image(pix_gray, width=250, caption="Converted to single-channel luminescence", use_container_width=False)
-            st.markdown("#### 2. Bilateral Smoothing")
-            st.image(pix_smooth, width=250, caption="Edge-preserving baseline applied", use_container_width=False)
-            st.markdown("#### 3. Absolute Difference")
-            st.image(pix_diff, width=250, caption="Pixel-wise deviation calculated", use_container_width=False)
+            st.markdown("---")
+            st.markdown("#### Step-by-Step Processing Pipeline")
+            st.markdown("**1. Grayscale Conversion**")
+            st.image(pix_gray, width=300, caption="Converted to single-channel luminescence", use_container_width=False)
+            st.markdown("**2. Bilateral Smoothing**")
+            st.image(pix_smooth, width=300, caption="Edge-preserving baseline applied", use_container_width=False)
+            st.markdown("**3. Absolute Difference**")
+            st.image(pix_diff, width=300, caption="Pixel-wise deviation calculated", use_container_width=False)
 
         elif st.session_state["active_insp"] == "qual":
             st.markdown("""
@@ -749,12 +743,14 @@ if selected_img is not None:
             st.image(quality_map, width=300, caption="Final Output: Compression Quality & Blocking Variance Map (1:1 Ratio)", use_container_width=False)
             st.success("✅ Quality blocking map computed successfully. Mismatched quantization grids expose spliced regions.")
             
-            st.markdown("#### 1. Grayscale Extract")
-            st.image(qual_gray.astype(np.uint8), width=250, caption="Base layer", use_container_width=False)
-            st.markdown("#### 2. 8x8 DCT Block Variance Calculation")
-            st.image(qual_block, width=250, caption="Raw variance array mapped", use_container_width=False, clamp=True)
-            st.markdown("#### 3. Scaling & Normalization")
-            st.image(qual_norm, width=250, caption="Scaled 0-255 map", use_container_width=False)
+            st.markdown("---")
+            st.markdown("#### Step-by-Step Processing Pipeline")
+            st.markdown("**1. Grayscale Extract**")
+            st.image(qual_gray.astype(np.uint8), width=300, caption="Base layer", use_container_width=False)
+            st.markdown("**2. 8x8 DCT Block Variance Calculation**")
+            st.image(qual_block, width=300, caption="Raw variance array mapped", use_container_width=False, clamp=True)
+            st.markdown("**3. Scaling & Normalization**")
+            st.image(qual_norm, width=300, caption="Scaled 0-255 map", use_container_width=False)
 
         elif st.session_state["active_insp"] == "srm":
             st.markdown("""
@@ -766,12 +762,12 @@ if selected_img is not None:
             st.image(srm_map, width=300, caption="Final Output: SRM High-Pass Sensor Noise Residuals (1:1 Ratio)", use_container_width=False)
             st.success("✅ SRM noise extraction completed. Abrupt noise cuts indicate foreign objects pasted from different cameras.")
             
-            st.markdown("#### 1. Image Grayscale")
-            st.image(srm_gray, width=250, caption="Grayscale preprocessing", use_container_width=False)
-            st.markdown("#### 2. 5x5 High-Pass Kernel Convolution")
-            st.image(srm_raw, width=250, caption="Raw PRNU noise extraction", use_container_width=False, clamp=True)
-            st.markdown("#### 3. Residual Amplification")
-            st.image(srm_noise, width=250, caption="Noise scaled by factor of 4x", use_container_width=False)
+            st.markdown("---")
+            st.markdown("#### Step-by-Step Processing Pipeline")
+            st.markdown("**1. Image Grayscale**")
+            st.image(srm_gray, width=300, caption="Grayscale preprocessing", use_container_width=False)
+            st.markdown("**2. 5x5 High-Pass Kernel Convolution**")
+            st.image(srm_noise, width=300, caption="Raw PRNU noise extraction (Scaled)", use_container_width=False)
 
         elif st.session_state["active_insp"] == "ela":
             st.markdown("""
@@ -783,12 +779,14 @@ if selected_img is not None:
             st.image(ela_default, width=300, caption=f"Final Output: Error Level Analysis (ELA) at Q={ela_q} (1:1 Ratio)", use_container_width=False)
             st.success("✅ ELA analysis completed successfully. Discrepancies in error brightness reveal manipulated regions.")
             
-            st.markdown(f"#### 1. Re-saving Target")
-            st.image(ela_resaved, width=250, caption=f"Image mathematically re-saved at JPEG Quality {ela_q}", use_container_width=False)
-            st.markdown("#### 2. Absolute Difference Calculation")
-            st.image(ela_diff_raw, width=250, caption="Pixel difference between Original and Re-saved", use_container_width=False)
-            st.markdown("#### 3. Enhancement Factor")
-            st.image(ela_default, width=250, caption="Error amplified by factor of 20x to reveal boundaries", use_container_width=False)
+            st.markdown("---")
+            st.markdown("#### Step-by-Step Processing Pipeline")
+            st.markdown("**1. Re-saving Target**")
+            st.image(ela_resaved, width=300, caption=f"Image mathematically re-saved at JPEG Quality {ela_q}", use_container_width=False)
+            st.markdown("**2. Absolute Difference Calculation**")
+            st.image(ela_diff_raw, width=300, caption="Pixel difference between Original and Re-saved", use_container_width=False)
+            st.markdown("**3. Enhancement Factor**")
+            st.image(ela_default, width=300, caption="Error amplified by factor of 20x to reveal boundaries", use_container_width=False)
 
         else:
             st.info("👆 Click any of the technique buttons above to execute the pipeline and inspect results on demand.")
