@@ -656,7 +656,7 @@ if selected_img is not None:
         st.session_state["forensic_history"].insert(0, current_case)
 
     # --------------------------------------------------------
-    # TAB 1: Multi-Spectral Inspector with Side-by-Side Custom Execution Buttons & Animations
+    # TAB 1: Multi-Spectral Inspector with Side-by-Side Custom Execution Buttons & Animations (1:1 Ratio width=300)
     # --------------------------------------------------------
     with main_tab:
         if st.session_state["last_analyzed_name"] != sample_name:
@@ -702,7 +702,7 @@ if selected_img is not None:
 
         st.write("---")
         st.subheader("🖼️ Multi-Spectral Inspector (On-Demand Execution with Step-by-Step Pipeline)")
-        st.caption("Click any custom technique button below to view its processing steps, trigger the HUD scan animation, and render results in a compact 1:1 square ratio on demand.")
+        st.caption("Click any custom technique button below to view its processing steps, trigger the HUD scan animation, and render results in a compact 1:1 square ratio (width=300) on demand.")
 
         # Side-by-side custom buttons for the 4 key techniques
         col_b1, col_b2, col_b3, col_b4 = st.columns(4)
@@ -713,7 +713,7 @@ if selected_img is not None:
         with col_b3:
             btn_srm = st.button("📡 SRM Noise", use_container_width=True)
         with col_b4:
-            btn_ela = st.button("🕵️ Error Level (ELA)", use_container_width=True)
+            btn_ela = st.button("🕵️️ Error Level (ELA)", use_container_width=True)
 
         st.write("---")
 
@@ -862,10 +862,7 @@ if selected_img is not None:
             st.markdown("#### Cryptographic & Perceptual Hashes")
             st.write("Generates bitstream SHA-256 digests and perceptual hashes.")
             if st.button("🚀 Compute Hashes", key="btn_hash", use_container_width=True):
-                st.code(f"SHA-256: {hashes['SHA-256']}
-MD5:     {hashes['MD5']}
-dHash:   {hashes['dHash']}
-aHash:   {hashes['aHash']}", language="bash")
+                st.code(f"SHA-256: {hashes['SHA-256']}\nMD5:     {hashes['MD5']}\ndHash:   {hashes['dHash']}\naHash:   {hashes['aHash']}", language="bash")
 
     # --------------------------------------------------------
     # TAB 3: History Audit
