@@ -1,4 +1,4 @@
-﻿import os
+import os
 import io
 import cv2
 import time
@@ -37,6 +37,7 @@ st.markdown("""
         color: #f1f5f9;
     }
 
+    /* Keyframe Animations */
     @keyframes pulseGlow {
         0% { border-color: rgba(56, 189, 248, 0.35); box-shadow: 0 0 10px rgba(56, 189, 248, 0.15); }
         50% { border-color: rgba(56, 189, 248, 0.95); box-shadow: 0 0 25px rgba(56, 189, 248, 0.45); }
@@ -101,8 +102,10 @@ st.markdown("""
         color: #ffffff !important;
     }
 
+    /* Laser Scanner HUD - Fixed Height for Running Animation */
     .laser-scan-frame {
         position: relative;
+        height: 55px;
         overflow: hidden;
         border: 2px solid #38bdf8;
         border-radius: 12px;
@@ -122,8 +125,8 @@ st.markdown("""
     }
     .hud-tag {
         position: absolute;
-        top: 10px;
-        left: 10px;
+        top: 12px;
+        left: 12px;
         background: rgba(15, 23, 42, 0.85);
         color: #38bdf8;
         padding: 4px 10px;
@@ -177,8 +180,10 @@ st.markdown("""
         animation: pulseIcon 2.5s infinite ease-in-out;
     }
 
+    /* Radar Container - Fixed Height for Running Animation */
     .radar-container {
         position: relative;
+        height: 50px;
         overflow: hidden;
         border: 1px solid rgba(56, 189, 248, 0.6);
         border-radius: 10px;
@@ -254,7 +259,7 @@ st.markdown("""
         font-size: 0.85rem;
     }
 </style>
-""""")
+""", unsafe_allow_html=True)
 
 def compute_hashes(img_bytes, img_pil):
     sha256 = hashlib.sha256(img_bytes).hexdigest()
@@ -519,7 +524,7 @@ with st.sidebar:
             sample_name = uploaded.name
 
     st.divider()
-    threshold = st.slider("Classification Threshold", 0.1, 0.9, 0.65, 0.05)
+    threshold = st.slider("Classification Threshold", 0.1, 0.9, 0.60, 0.05)
     ela_q = st.slider("ELA Quality Base", 75, 95, 90, 5)
 
     if len(st.session_state["forensic_history"]) > 0:
@@ -531,7 +536,7 @@ with st.sidebar:
             st.rerun()
 
 st.title("🔬 Forensic Inspection & Multi-Parameter Suite")
-st.write("Deep learning detection fused with PRNU noise, CMAF keypoints, ELA compression, and frequency spectral analysis.")
+st.write("Deep learning detection fused with PRNU noise, ELA compression, and frequency spectral analysis.")
 
 main_tab, param_tab, history_tab = st.tabs([
     "⚡ Multi-Spectral Inspector",
@@ -780,7 +785,10 @@ if selected_img is not None:
             st.markdown("#### Cryptographic & Perceptual Hashes")
             st.write("Generates bitstream SHA-256 digests and perceptual hashes.")
             if st.button("🚀 Compute Hashes", key="btn_hash", use_container_width=True):
-                st.code("SHA-256: " + hashes['SHA-256'] + "\nMD5:     " + hashes['MD5'] + "\ndHash:   " + hashes['dHash'] + "\naHash:   " + hashes['aHash'], language="bash")
+                st.code("SHA-256: " + hashes['SHA-256'] + "
+MD5:     " + hashes['MD5'] + "
+dHash:   " + hashes['dHash'] + "
+aHash:   " + hashes['aHash'], language="bash")
 
     with history_tab:
         st.subheader("📜 Forensic Session Records & Historical Evidence Log")
