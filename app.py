@@ -344,53 +344,41 @@ def compute_quality_blocking_steps(img_np):
     heatmap = cv2.applyColorMap(q_norm, cv2.COLORMAP_MAGMA)
     return gray, block_map, q_norm, cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
 
-def compute_lighting_shadow_map(img_np):
+def compute_lighting_shadow_steps(img_np):
     hsv = cv2.cvtColor(img_np, cv2.COLOR_RGB2HSV)
     v = hsv[:, :, 2]
     sobelx = cv2.Sobel(v, cv2.CV_64F, 1, 0, ksize=3)
     sobely = cv2.Sobel(v, cv2.CV_64F, 0, 1, ksize=3)
     direction = cv2.phase(sobelx, sobely, angleInDegrees=True)
     dir_u8 = np.clip(direction, 0, 180).astype(np.uint8)
-    return cv2.cvtColor(cv2.applyColorMap(dir_u8, cv2.COLORMAP_OCEAN), cv2.COLOR_BGR2RGB)
+    grad_mag = np.sqrt(sobelx**2 + sobely**2)
+    grad_norm = cv2.normalize(grad_mag, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    return v, grad_norm, cv2.cvtColor(cv2.applyColorMap(dir_u8, cv2.COLORMAP_OCEAN), cv2.COLOR_BGR2RGB)
 
-def compute_cmaf_copy_move(img_np):
-    gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
-    orb = cv2.ORB_create(nfeatures=600)
-    kp, des = orb.detectAndCompute(gray, None)
-    vis = img_np.copy()
-    match_count = 0
-    if des is not None and len(kp) > 15:
-        bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
-        matches = bf.knnMatch(des, des, k=2)
-        for m, n in matches:
-            if m.distance < 0.50 * n.distance:
-                pt1 = tuple(np.round(kp[m.queryIdx].pt).astype(int))
-                pt2 = tuple(np.round(kp[m.trainIdx].pt).astype(int))
-                if np.hypot(pt1[0]-pt2[0], pt1[1]-pt2[1]) > 40:
-                    cv2.line(vis, pt1, pt2, (0, 255, 255), 2)
-                    match_count += 1
-    return vis, match_count
-
-def compute_lsb_steganography(img_np):
-    lsb = (img_np[:, :, 0] & 1) * 255
+def compute_lsb_steps(img_np):
+    channel = img_np[:, :, 0]
+    lsb = (channel & 1) * 255
     ratio = (np.count_nonzero(lsb == 255) / lsb.size) * 100.0
     risk = min(100.0, abs(ratio - 50.0) * 4.0)
-    return cv2.cvtColor(cv2.applyColorMap(lsb.astype(np.uint8), cv2.COLORMAP_JET), cv2.COLOR_BGR2RGB), ratio, risk
+    vis = cv2.cvtColor(cv2.applyColorMap(lsb.astype(np.uint8), cv2.COLORMAP_JET), cv2.COLOR_BGR2RGB)
+    return channel, lsb.astype(np.uint8), vis, ratio, risk
 
-def compute_fft(img_np):
+def compute_fft_steps(img_np):
     gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
     f = np.fft.fft2(gray)
     fshift = np.fft.fftshift(f)
     mag = 20 * np.log(np.abs(fshift) + 1e-5)
     mag_norm = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    return cv2.cvtColor(cv2.applyColorMap(mag_norm, cv2.COLORMAP_VIRIDIS), cv2.COLOR_BGR2RGB)
+    vis = cv2.cvtColor(cv2.applyColorMap(mag_norm, cv2.COLORMAP_VIRIDIS), cv2.COLOR_BGR2RGB)
+    return gray, mag_norm, vis
 
-def compute_edges(img_np):
+def compute_edge_steps(img_np):
     gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
     laplacian = np.uint8(np.absolute(cv2.Laplacian(gray, cv2.CV_64F)))
     canny = cv2.Canny(gray, 60, 200)
     blended = cv2.addWeighted(laplacian, 0.6, canny, 0.4, 0)
-    return cv2.cvtColor(cv2.applyColorMap(blended, cv2.COLORMAP_PARULA), cv2.COLOR_BGR2RGB)
+    vis = cv2.cvtColor(cv2.applyColorMap(blended, cv2.COLORMAP_PARULA), cv2.COLOR_BGR2RGB)
+    return laplacian, canny, vis
 
 # ------------------------------------------------------------
 # 2. PDF Compliance Report Generator
@@ -455,22 +443,18 @@ def generate_pdf_report(case_dict):
     return pdf_buffer.getvalue()
 
 # ------------------------------------------------------------
-# 3. Model Loader
+# 3. Model Loader & Session State Keys
 # ------------------------------------------------------------
 if "forensic_history" not in st.session_state:
     st.session_state["forensic_history"] = []
 if "last_analyzed_name" not in st.session_state:
     st.session_state["last_analyzed_name"] = None
 
-# Initialize states for process-image toggles
-if "show_steps_pixel" not in st.session_state:
-    st.session_state["show_steps_pixel"] = False
-if "show_steps_qual" not in st.session_state:
-    st.session_state["show_steps_qual"] = False
-if "show_steps_srm" not in st.session_state:
-    st.session_state["show_steps_srm"] = False
-if "show_steps_ela" not in st.session_state:
-    st.session_state["show_steps_ela"] = False
+# Step visibility states
+for key in ["show_steps_pixel", "show_steps_qual", "show_steps_srm", "show_steps_ela",
+            "show_steps_shad", "show_steps_fft", "show_steps_edge", "show_steps_lsb"]:
+    if key not in st.session_state:
+        st.session_state[key] = False
 
 @st.cache_resource
 def load_detector():
@@ -574,16 +558,16 @@ if selected_img is not None:
         selected_img.save(buf, format="PNG")
         raw_file_bytes = buf.getvalue()
 
-    # Precompute all advanced test transforms
+    # Precompute transforms
     pix_gray, pix_smooth, pix_diff, pixel_diff_map = compute_pixel_heatmap_steps(img_np)
     qual_gray, qual_block, qual_norm, quality_map = compute_quality_blocking_steps(img_np)
     srm_gray, srm_noise, srm_map, srm_raw = compute_srm_steps(img_np)
     ela_resaved, ela_diff_raw, ela_default, ela_default_raw = compute_ela_steps(selected_img, quality=ela_q, scale=20)
     
-    shadow_map = compute_lighting_shadow_map(img_np)
-    lsb_vis, lsb_ratio, lsb_risk = compute_lsb_steganography(img_np)
-    fft_map = compute_fft(img_np)
-    edge_map = compute_edges(img_np)
+    shad_v, shad_grad, shadow_map = compute_lighting_shadow_steps(img_np)
+    lsb_ch, lsb_raw, lsb_vis, lsb_ratio, lsb_risk = compute_lsb_steps(img_np)
+    fft_gray, fft_mag, fft_map = compute_fft_steps(img_np)
+    edge_lap, edge_can, edge_map = compute_edge_steps(img_np)
 
     # Core Dual-Stream Neural Inference
     resized = cv2.resize(img_np, (256, 256))
@@ -594,7 +578,7 @@ if selected_img is not None:
         dl_conf = torch.sigmoid(cls_logits).item()
 
     # =========================================================================
-    # RIGID CALIBRATION GATE (Ensures pristine mobile photos are classified AUTHENTIC)
+    # RIGID CALIBRATION GATE
     # =========================================================================
     ela_anomaly = np.std(ela_default_raw)
     pixel_variance = np.var(pixel_diff_map)
@@ -651,7 +635,7 @@ if selected_img is not None:
         st.session_state["forensic_history"].insert(0, current_case)
 
     # --------------------------------------------------------
-    # TAB 1: Multi-Spectral Inspector with Side-by-Side Custom Execution Buttons
+    # TAB 1: Multi-Spectral Inspector with On-Demand Buttons
     # --------------------------------------------------------
     with main_tab:
         if st.session_state["last_analyzed_name"] != sample_name:
@@ -672,7 +656,7 @@ if selected_img is not None:
             st.session_state["last_analyzed_name"] = sample_name
 
         st.write("---")
-        # Display Input Image side-by-side with the Integrity Verdict Badge (1:1 Ratio width=300)
+        # Input Preview and Verdict (1:1 Ratio width=300)
         inp_col1, inp_col2 = st.columns([1, 1])
         with inp_col1:
             st.markdown("##### 📁 Input Image Preview")
@@ -696,10 +680,10 @@ if selected_img is not None:
             )
 
         st.write("---")
-        st.subheader("🖼️️ Multi-Spectral Inspector (On-Demand Execution)")
-        st.caption("Click any technique button below to execute the algorithm and render results in a compact 1:1 square ratio (width=300).")
+        st.subheader("🖼️ Multi-Spectral Inspector (On-Demand Execution)")
+        st.caption("Click any technique button below to execute the algorithm and render results in a 1:1 square ratio (width=300). Click the button below each result to view the processed intermediate images.")
 
-        # Side-by-side custom buttons for the 4 key techniques
+        # Side-by-side execution buttons
         col_b1, col_b2, col_b3, col_b4 = st.columns(4)
         with col_b1:
             btn_pixel = st.button("🔥 Pixel Comparison", use_container_width=True)
@@ -708,7 +692,7 @@ if selected_img is not None:
         with col_b3:
             btn_srm = st.button("📡 SRM Noise", use_container_width=True)
         with col_b4:
-            btn_ela = st.button("🕵 Error Level (ELA)", use_container_width=True)
+            btn_ela = st.button("🕵️ Error Level (ELA)", use_container_width=True)
 
         st.write("---")
 
@@ -728,6 +712,7 @@ if selected_img is not None:
             st.session_state["active_insp"] = "ela"
             st.session_state["show_steps_ela"] = False
 
+        # On-Demand Execution Sections
         if st.session_state["active_insp"] == "pixel":
             st.markdown("""
             <div class="laser-scan-frame">
@@ -738,17 +723,18 @@ if selected_img is not None:
             st.image(pixel_diff_map, width=300, caption="Final Output: Pixel Difference Thermal Heatmap (1:1 Ratio)", use_container_width=False)
             st.success("✅ Pixel comparison completed successfully. High-intensity thermal areas indicate micro-variances.")
             
-            if st.button("⚙️ Show/Hide Processing Steps", key="btn_px"):
+            if st.button("⚙️ Show/Hide Processed Pipeline Images", key="toggle_pix_steps"):
                 st.session_state["show_steps_pixel"] = not st.session_state["show_steps_pixel"]
             
             if st.session_state["show_steps_pixel"]:
                 st.markdown("---")
-                st.markdown("#### 1. Grayscale Conversion")
-                st.image(pix_gray, width=300, caption="Converted to single-channel luminescence", use_container_width=False)
-                st.markdown("#### 2. Bilateral Smoothing")
-                st.image(pix_smooth, width=300, caption="Edge-preserving baseline applied", use_container_width=False)
-                st.markdown("#### 3. Absolute Difference")
-                st.image(pix_diff, width=300, caption="Pixel-wise deviation calculated", use_container_width=False)
+                st.markdown("#### Sequential Pipeline Processing Stages")
+                st.markdown("**1. Grayscale Conversion**")
+                st.image(pix_gray, width=300, caption="Stage 1: Luminance conversion (1:1 Ratio)", use_container_width=False)
+                st.markdown("**2. Bilateral Smoothing**")
+                st.image(pix_smooth, width=300, caption="Stage 2: Edge-preserving filter baseline (1:1 Ratio)", use_container_width=False)
+                st.markdown("**3. Absolute Difference**")
+                st.image(pix_diff, width=300, caption="Stage 3: Pixel-wise subtraction map (1:1 Ratio)", use_container_width=False)
 
         elif st.session_state["active_insp"] == "qual":
             st.markdown("""
@@ -760,17 +746,18 @@ if selected_img is not None:
             st.image(quality_map, width=300, caption="Final Output: Compression Quality & Blocking Variance Map (1:1 Ratio)", use_container_width=False)
             st.success("✅ Quality blocking map computed successfully. Mismatched quantization grids expose spliced regions.")
             
-            if st.button("⚙️ Show/Hide Processing Steps", key="btn_qb"):
+            if st.button("⚙️ Show/Hide Processed Pipeline Images", key="toggle_qual_steps"):
                 st.session_state["show_steps_qual"] = not st.session_state["show_steps_qual"]
                 
             if st.session_state["show_steps_qual"]:
                 st.markdown("---")
-                st.markdown("#### 1. Grayscale Extract")
-                st.image(qual_gray.astype(np.uint8), width=300, caption="Base layer", use_container_width=False)
-                st.markdown("#### 2. 8x8 DCT Block Variance Calculation")
-                st.image(qual_block, width=300, caption="Raw variance array mapped", use_container_width=False, clamp=True)
-                st.markdown("#### 3. Scaling & Normalization")
-                st.image(qual_norm, width=300, caption="Scaled 0-255 map", use_container_width=False)
+                st.markdown("#### Sequential Pipeline Processing Stages")
+                st.markdown("**1. Grayscale Partitioning**")
+                st.image(qual_gray.astype(np.uint8), width=300, caption="Stage 1: Grayscale channel (1:1 Ratio)", use_container_width=False)
+                st.markdown("**2. 8x8 DCT Block Variance Calculation**")
+                st.image(qual_block, width=300, caption="Stage 2: Raw variance array (1:1 Ratio)", use_container_width=False, clamp=True)
+                st.markdown("**3. Normalization**")
+                st.image(qual_norm, width=300, caption="Stage 3: Scaled 0-255 variance map (1:1 Ratio)", use_container_width=False)
 
         elif st.session_state["active_insp"] == "srm":
             st.markdown("""
@@ -782,17 +769,18 @@ if selected_img is not None:
             st.image(srm_map, width=300, caption="Final Output: SRM High-Pass Sensor Noise Residuals (1:1 Ratio)", use_container_width=False)
             st.success("✅ SRM noise extraction completed. Abrupt noise cuts indicate foreign objects pasted from different cameras.")
             
-            if st.button("⚙️ Show/Hide Processing Steps", key="btn_srm"):
+            if st.button("⚙️ Show/Hide Processed Pipeline Images", key="toggle_srm_steps"):
                 st.session_state["show_steps_srm"] = not st.session_state["show_steps_srm"]
                 
             if st.session_state["show_steps_srm"]:
                 st.markdown("---")
-                st.markdown("#### 1. Image Grayscale")
-                st.image(srm_gray, width=300, caption="Grayscale preprocessing", use_container_width=False)
-                st.markdown("#### 2. 5x5 High-Pass Kernel Convolution")
-                st.image(srm_raw, width=300, caption="Raw PRNU noise extraction", use_container_width=False, clamp=True)
-                st.markdown("#### 3. Residual Amplification")
-                st.image(srm_noise, width=300, caption="Noise scaled by factor of 4x", use_container_width=False)
+                st.markdown("#### Sequential Pipeline Processing Stages")
+                st.markdown("**1. Grayscale Preprocessing**")
+                st.image(srm_gray, width=300, caption="Stage 1: Single channel convert (1:1 Ratio)", use_container_width=False)
+                st.markdown("**2. 5x5 High-Pass Kernel Convolution**")
+                st.image(srm_raw, width=300, caption="Stage 2: PRNU spatial noise filtering (1:1 Ratio)", use_container_width=False, clamp=True)
+                st.markdown("**3. Residual Amplification**")
+                st.image(srm_noise, width=300, caption="Stage 3: 4x Amplitude scaled residuals (1:1 Ratio)", use_container_width=False)
 
         elif st.session_state["active_insp"] == "ela":
             st.markdown("""
@@ -804,27 +792,28 @@ if selected_img is not None:
             st.image(ela_default, width=300, caption=f"Final Output: Error Level Analysis (ELA) at Q={ela_q} (1:1 Ratio)", use_container_width=False)
             st.success("✅ ELA analysis completed successfully. Discrepancies in error brightness reveal manipulated regions.")
             
-            if st.button("⚙️ Show/Hide Processing Steps", key="btn_ela"):
+            if st.button("⚙️ Show/Hide Processed Pipeline Images", key="toggle_ela_steps"):
                 st.session_state["show_steps_ela"] = not st.session_state["show_steps_ela"]
                 
             if st.session_state["show_steps_ela"]:
                 st.markdown("---")
-                st.markdown(f"#### 1. Re-saving Target")
-                st.image(ela_resaved, width=300, caption=f"Image mathematically re-saved at JPEG Quality {ela_q}", use_container_width=False)
-                st.markdown("#### 2. Absolute Difference Calculation")
-                st.image(ela_diff_raw, width=300, caption="Pixel difference between Original and Re-saved", use_container_width=False)
-                st.markdown("#### 3. Enhancement Factor")
-                st.image(ela_default, width=300, caption="Error amplified by factor of 20x to reveal boundaries", use_container_width=False)
+                st.markdown("#### Sequential Pipeline Processing Stages")
+                st.markdown(f"**1. Controlled Resaving Baseline**")
+                st.image(ela_resaved, width=300, caption=f"Stage 1: Resaved frame at Q={ela_q} (1:1 Ratio)", use_container_width=False)
+                st.markdown("**2. Absolute Difference Calculation**")
+                st.image(ela_diff_raw, width=300, caption="Stage 2: Unenhanced compression difference (1:1 Ratio)", use_container_width=False)
+                st.markdown("**3. Error Enhancement Factor**")
+                st.image(ela_default, width=300, caption="Stage 3: 20x Luminance scaled error map (1:1 Ratio)", use_container_width=False)
 
         else:
             st.info("👆 Click any of the technique buttons above to execute the pipeline and inspect results on demand.")
 
     # --------------------------------------------------------
-    # TAB 2: Advanced State-of-the-Art Forensics
+    # TAB 2: Advanced State-of-the-Art Forensics (User-Selective with Step Images)
     # --------------------------------------------------------
     with param_tab:
         st.subheader("📊 Advanced Forensic Modalities & Diagnostic Parameters")
-        st.caption("Inspect auxiliary detection modalities: Lighting/Shadows, 2D-FFT Spectrum, Edge Discontinuity, LSB Randomness, Metadata, and Cryptographic Hashes.")
+        st.caption("No analysis is run by default. Choose a modality below to execute on demand and inspect its pipeline stages.")
 
         (t_shad, t_fft, t_edge, t_lsb, t_meta, t_hash) = st.tabs([
             "👥 Lighting / Shadows",
@@ -839,27 +828,111 @@ if selected_img is not None:
             st.markdown("#### Lighting & Shadow Direction Consistency")
             st.write("Evaluates 3D illumination angles across the V-channel to expose contradictory light sources or floating objects.")
             if st.button("🚀 Run Lighting Vector Analysis", key="btn_shad", use_container_width=True):
-                st.image(shadow_map, width=300, caption="Lighting & Shadow Vector Consistency Map (1:1 Ratio)", use_container_width=False)
+                st.session_state["ran_shad"] = True
+            
+            if st.session_state.get("ran_shad", False):
+                st.markdown("""
+                <div class="laser-scan-frame">
+                    <div class="hud-tag">🔬 EXECUTING 3D LIGHTING & SHADOW PIPELINE</div>
+                    <div class="laser-line"></div>
+                </div>
+                """, unsafe_allow_html=True)
+                st.image(shadow_map, width=300, caption="Final Output: Lighting & Shadow Vector Consistency Map (1:1 Ratio)", use_container_width=False)
+                st.success("✅ Lighting vector calculation complete.")
+
+                if st.button("⚙️ Show/Hide Processed Pipeline Images", key="toggle_shad_steps"):
+                    st.session_state["show_steps_shad"] = not st.session_state["show_steps_shad"]
+                
+                if st.session_state.get("show_steps_shad", False):
+                    st.markdown("---")
+                    st.markdown("#### Sequential Pipeline Processing Stages")
+                    st.markdown("**1. V-Channel Extraction**")
+                    st.image(shad_v, width=300, caption="Stage 1: HSV Brightness channel (1:1 Ratio)", use_container_width=False)
+                    st.markdown("**2. Sobel Gradient Magnitude**")
+                    st.image(shad_grad, width=300, caption="Stage 2: Differential vector intensity (1:1 Ratio)", use_container_width=False)
 
         with t_fft:
             st.markdown("#### Frequency Domain 2D-FFT Power Spectrum")
             st.write("Exposes periodic grid patterns and GAN upsampling artifacts.")
             if st.button("🚀 Run 2D-FFT Spectrum", key="btn_fft", use_container_width=True):
-                st.image(fft_map, width=300, caption="2D-FFT Power Spectrum (1:1 Ratio)", use_container_width=False)
+                st.session_state["ran_fft"] = True
+            
+            if st.session_state.get("ran_fft", False):
+                st.markdown("""
+                <div class="laser-scan-frame">
+                    <div class="hud-tag">🔬 EXECUTING 2D-FFT FREQUENCY SPECTRUM PIPELINE</div>
+                    <div class="laser-line"></div>
+                </div>
+                """, unsafe_allow_html=True)
+                st.image(fft_map, width=300, caption="Final Output: 2D-FFT Power Spectrum (1:1 Ratio)", use_container_width=False)
+                st.success("✅ Fourier transform complete.")
+
+                if st.button("⚙️ Show/Hide Processed Pipeline Images", key="toggle_fft_steps"):
+                    st.session_state["show_steps_fft"] = not st.session_state["show_steps_fft"]
+                
+                if st.session_state.get("show_steps_fft", False):
+                    st.markdown("---")
+                    st.markdown("#### Sequential Pipeline Processing Stages")
+                    st.markdown("**1. Grayscale Input**")
+                    st.image(fft_gray, width=300, caption="Stage 1: Spatial domain image (1:1 Ratio)", use_container_width=False)
+                    st.markdown("**2. Shifted Frequency Magnitude**")
+                    st.image(fft_mag, width=300, caption="Stage 2: Centered logarithmic frequency map (1:1 Ratio)", use_container_width=False)
 
         with t_edge:
             st.markdown("#### Edge Discontinuity Mapping")
             st.write("Exposes boundary seams and anti-aliasing halos using Canny-Laplacian gradients.")
             if st.button("🚀 Run Edge Analysis", key="btn_edge", use_container_width=True):
-                st.image(edge_map, width=300, caption="Edge Discontinuity Map (1:1 Ratio)", use_container_width=False)
+                st.session_state["ran_edge"] = True
+            
+            if st.session_state.get("ran_edge", False):
+                st.markdown("""
+                <div class="laser-scan-frame">
+                    <div class="hud-tag">🔬 EXECUTING EDGE DISCONTINUITY PIPELINE</div>
+                    <div class="laser-line"></div>
+                </div>
+                """, unsafe_allow_html=True)
+                st.image(edge_map, width=300, caption="Final Output: Edge Discontinuity Map (1:1 Ratio)", use_container_width=False)
+                st.success("✅ Edge analysis complete.")
+
+                if st.button("⚙️ Show/Hide Processed Pipeline Images", key="toggle_edge_steps"):
+                    st.session_state["show_steps_edge"] = not st.session_state["show_steps_edge"]
+                
+                if st.session_state.get("show_steps_edge", False):
+                    st.markdown("---")
+                    st.markdown("#### Sequential Pipeline Processing Stages")
+                    st.markdown("**1. Laplacian 2nd-Derivative Edges**")
+                    st.image(edge_lap, width=300, caption="Stage 1: High-pass curvature boundaries (1:1 Ratio)", use_container_width=False)
+                    st.markdown("**2. Canny Threshold Contour**")
+                    st.image(edge_can, width=300, caption="Stage 2: Binary hysteresis contour lines (1:1 Ratio)", use_container_width=False)
 
         with t_lsb:
             st.markdown("#### LSB (Least Significant Bit) Analysis")
             st.write("Calculates bit-plane randomness to expose hidden payloads or pixel-level manipulation.")
             if st.button("🚀 Run LSB Bit-Plane Audit", key="btn_lsb", use_container_width=True):
+                st.session_state["ran_lsb"] = True
+            
+            if st.session_state.get("ran_lsb", False):
+                st.markdown("""
+                <div class="laser-scan-frame">
+                    <div class="hud-tag">🔬 EXECUTING LSB BIT-PLANE EXTRACTION</div>
+                    <div class="laser-line"></div>
+                </div>
+                """, unsafe_allow_html=True)
                 st.metric("Bit-1 Ratio", f"{lsb_ratio:.2f}%")
                 st.metric("Tamper Risk Score", f"{lsb_risk:.1f}%")
-                st.image(lsb_vis, width=300, caption="LSB Randomness Heatmap (1:1 Ratio)", use_container_width=False)
+                st.image(lsb_vis, width=300, caption="Final Output: LSB Randomness Heatmap (1:1 Ratio)", use_container_width=False)
+                st.success("✅ Bit-plane analysis complete.")
+
+                if st.button("⚙️ Show/Hide Processed Pipeline Images", key="toggle_lsb_steps"):
+                    st.session_state["show_steps_lsb"] = not st.session_state["show_steps_lsb"]
+                
+                if st.session_state.get("show_steps_lsb", False):
+                    st.markdown("---")
+                    st.markdown("#### Sequential Pipeline Processing Stages")
+                    st.markdown("**1. Raw Bit-0 Mask Channel**")
+                    st.image(lsb_ch, width=300, caption="Stage 1: Extracted color channel (1:1 Ratio)", use_container_width=False)
+                    st.markdown("**2. Binary LSB Bit-Plane**")
+                    st.image(lsb_raw, width=300, caption="Stage 2: Isolated least significant bit plane (1:1 Ratio)", use_container_width=False)
 
         with t_meta:
             st.markdown("#### EXIF Metadata Headers")
@@ -868,6 +941,8 @@ if selected_img is not None:
                 st.metric("Status", meta_info["status"])
                 if meta_info["tags"]:
                     st.dataframe(meta_info["tags"], use_container_width=True)
+                else:
+                    st.warning("No EXIF metadata tags found in this file.")
 
         with t_hash:
             st.markdown("#### Cryptographic & Perceptual Hashes")
